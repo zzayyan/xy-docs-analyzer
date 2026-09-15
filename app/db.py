@@ -9,7 +9,7 @@ SCHEMA = [
     "CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE",
     "CREATE CONSTRAINT section_id IF NOT EXISTS FOR (s:Section) REQUIRE s.id IS UNIQUE",
     "CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS FOR (c:Chunk) ON c.embedding "
-    f"OPTIONS {{indexConfig: {{`vector.dimensions`: {settings.embed_dim}, "
+    f"OPTIONS {{indexConfig: {{`vector.dimensions`: {settings.embed_dim_active}, "
     "`vector.similarity_function`: 'cosine'}}",
     "CREATE FULLTEXT INDEX chunk_text IF NOT EXISTS FOR (c:Chunk) ON EACH [c.text]",
     "CREATE INDEX entity_key IF NOT EXISTS FOR (e:__Entity__) ON (e.file_id, e.key)",
@@ -25,6 +25,16 @@ def graph() -> Neo4jGraph:
         password=settings.neo4j_password,
         refresh_schema=False,
     )
+    try:
+        rows = g.query("SHOW INDEXES YIELD name, options")
+        chunk_idx = [r for r in rows if r.get("name") == "chunk_embedding"]
+        if chunk_idx:
+            curr_dim = chunk_idx[0].get("options", {}).get("indexConfig", {}).get("vector.dimensions")
+            if curr_dim and curr_dim != settings.embed_dim_active:
+                g.query("DROP INDEX chunk_embedding IF EXISTS")
+    except Exception:
+        pass
+
     for statement in SCHEMA:
         g.query(statement)
     return g
