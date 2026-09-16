@@ -54,9 +54,13 @@ export function DocumentsScreen() {
 
   const rows = documents.map((doc) => ({
     name: (
+      // The design system defines --text-link/--text-link-hover for exactly this; using
+      // --text-title here (matching heading color, no underline) made every document name look
+      // like a plain bold label instead of a link, which is why it went unclicked -- there was no
+      // page for the chat because nothing was showing the way in.
       <a
         href={`#/doc/${doc.id}`}
-        style={{ fontWeight: 'var(--fw-medium)', color: 'var(--text-title)', textDecoration: 'none' }}
+        style={{ fontWeight: 'var(--fw-medium)', color: 'var(--text-link)', textDecoration: 'underline' }}
       >
         {doc.name}
       </a>
