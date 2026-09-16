@@ -1,8 +1,9 @@
 import tempfile
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app import store
@@ -13,13 +14,24 @@ from app.ingest.pipeline import create_file, ingest
 
 READ_CHUNK = 1024 * 1024
 
+CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
 app = FastAPI(title="Docs Analyzer")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    # A handler registered for the bare Exception class (as opposed to HTTPException) is wired
+    # into Starlette's ServerErrorMiddleware, which wraps the whole app *outside* CORSMiddleware --
+    # so its response skips CORS headers regardless of what CORSMiddleware is configured with. A
+    # plain 500 (e.g. Neo4j unreachable) would otherwise reach the browser as an opaque CORS
+    # failure instead of the real error. Adding the header here directly is the documented
+    # workaround. No auth on this API and no logging setup yet, so the detail is the exception
+    # text itself -- fine for local dev, revisit if this API is ever exposed beyond localhost.
+    origin = request.headers.get("origin")
+    headers = {"Access-Control-Allow-Origin": origin} if origin in CORS_ORIGINS else {}
+    return JSONResponse(status_code=500, content={"detail": str(exc)}, headers=headers)
 
 
 class ChatRequest(BaseModel):
