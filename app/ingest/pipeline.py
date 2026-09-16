@@ -28,7 +28,7 @@ def progress_between(file_id: str, start: float, end: float):
 def ingest(file_id: str, path: str) -> None:
     try:
         set_status(file_id, status="converting", progress=0.05)
-        doc, tokens, chunks = convert(path)
+        doc, tokens, chunks = convert(path, on_progress=progress_between(file_id, 0.05, 0.3))
         mode = "long" if tokens > settings.long_doc_tokens else "short"
         set_status(file_id, tokens=tokens, mode=mode, chunks=len(chunks), status="embedding", progress=0.3)
 

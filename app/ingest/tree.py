@@ -1,9 +1,11 @@
 """PageIndex-style section tree built from Docling headings, with an LLM summary per section."""
 import re
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from docling_core.types.doc.document import DoclingDocument, SectionHeaderItem, TitleItem
 
+from app.config import settings
 from app.db import graph
 from app.models import llm
 
@@ -121,16 +123,20 @@ def summarize_sections(
         if section["parent"]:
             child_titles.setdefault(section["parent"], []).append(section["title"])
 
-    for done, section in enumerate(sections, start=1):
-        if section["id"] in texts:
-            text = "\n\n".join(texts[section["id"]])[:SUMMARY_MAX_CHARS]
-            message = llm().invoke([("system", SUMMARY_PROMPT), ("human", f"Section: {section['title']}\n\n{text}")])
-            section["summary"] = message.content.strip()
-        else:
+    def summarize(section: dict) -> str:
+        if section["id"] not in texts:
             # Container heading with no body text: its children describe it, no LLM call needed
-            section["summary"] = "Contains: " + "; ".join(child_titles.get(section["id"], []))
-        if on_progress:
-            on_progress(done, len(sections))
+            return "Contains: " + "; ".join(child_titles.get(section["id"], []))
+        text = "\n\n".join(texts[section["id"]])[:SUMMARY_MAX_CHARS]
+        message = llm().invoke([("system", SUMMARY_PROMPT), ("human", f"Section: {section['title']}\n\n{text}")])
+        return message.content.strip()
+
+    # One independent LLM call per section, so they run together; map() keeps document order
+    with ThreadPoolExecutor(max_workers=settings.llm_concurrency) as pool:
+        for done, (section, summary) in enumerate(zip(sections, pool.map(summarize, sections)), start=1):
+            section["summary"] = summary
+            if on_progress:
+                on_progress(done, len(sections))
 
 
 def store_tree(file_id: str, sections: list[dict], chunk_section: dict[str, str]) -> None:

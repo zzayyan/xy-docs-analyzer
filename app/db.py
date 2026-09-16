@@ -9,12 +9,56 @@ SCHEMA = [
     "CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE",
     "CREATE CONSTRAINT section_id IF NOT EXISTS FOR (s:Section) REQUIRE s.id IS UNIQUE",
     "CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS FOR (c:Chunk) ON c.embedding "
-    f"OPTIONS {{indexConfig: {{`vector.dimensions`: {settings.embed_dim_active}, "
+    f"OPTIONS {{indexConfig: {{`vector.dimensions`: {settings.embed_dim}, "
     "`vector.similarity_function`: 'cosine'}}",
     "CREATE FULLTEXT INDEX chunk_text IF NOT EXISTS FOR (c:Chunk) ON EACH [c.text]",
     "CREATE INDEX entity_key IF NOT EXISTS FOR (e:__Entity__) ON (e.file_id, e.key)",
     "CREATE FULLTEXT INDEX entity_name IF NOT EXISTS FOR (e:__Entity__) ON EACH [e.name]",
 ]
+
+READ_MARKER = """
+MERGE (m:Meta {key: 'embedding'})
+ON CREATE SET m.model = $model, m.dim = $dim
+RETURN m.model AS model, m.dim AS dim
+"""
+
+RESET_MESSAGE = (
+    "Neo4j holds {chunks} chunks embedded with {old} ({old_dim} dims), but the config uses {new} ({new_dim} dims). "
+    "Vectors from different models are not comparable, so search would silently return nonsense. "
+    "Set the provider back, or re-ingest the documents after running in Neo4j: "
+    "MATCH (c:Chunk) DETACH DELETE c; DROP INDEX chunk_embedding IF EXISTS; "
+    "MATCH (m:Meta {{key: 'embedding'}}) DELETE m"
+)
+
+
+def check_embedding_model(g: Neo4jGraph) -> None:
+    """Refuse to mix embeddings from different models, which a dimension check alone does not catch."""
+    stored = g.query(READ_MARKER, {"model": settings.embed_model, "dim": settings.embed_dim})[0]
+    if stored["model"] == settings.embed_model and stored["dim"] == settings.embed_dim:
+        # The marker only knows what it was told, so confirm it against a vector that is actually stored:
+        # a database written before the marker existed can still hold vectors of another size
+        sample = g.query("MATCH (c:Chunk) WHERE c.embedding IS NOT NULL RETURN size(c.embedding) AS dim LIMIT 1")
+        if sample and sample[0]["dim"] != settings.embed_dim:
+            chunks = g.query("MATCH (c:Chunk) WHERE c.embedding IS NOT NULL RETURN count(c) AS n")[0]["n"]
+            raise RuntimeError(RESET_MESSAGE.format(
+                chunks=chunks, old="an unknown model", old_dim=sample[0]["dim"],
+                new=settings.embed_model, new_dim=settings.embed_dim,
+            ))
+        return
+
+    chunks = g.query("MATCH (c:Chunk) WHERE c.embedding IS NOT NULL RETURN count(c) AS n")[0]["n"]
+    if chunks:
+        raise RuntimeError(RESET_MESSAGE.format(
+            chunks=chunks, old=stored["model"], old_dim=stored["dim"],
+            new=settings.embed_model, new_dim=settings.embed_dim,
+        ))
+
+    # Nothing embedded yet, so adopt the new model and let SCHEMA rebuild the index at its dimension
+    g.query(
+        "MATCH (m:Meta {key: 'embedding'}) SET m.model = $model, m.dim = $dim",
+        {"model": settings.embed_model, "dim": settings.embed_dim},
+    )
+    g.query("DROP INDEX chunk_embedding IF EXISTS")
 
 
 @lru_cache
@@ -25,16 +69,7 @@ def graph() -> Neo4jGraph:
         password=settings.neo4j_password,
         refresh_schema=False,
     )
-    try:
-        rows = g.query("SHOW INDEXES YIELD name, options")
-        chunk_idx = [r for r in rows if r.get("name") == "chunk_embedding"]
-        if chunk_idx:
-            curr_dim = chunk_idx[0].get("options", {}).get("indexConfig", {}).get("vector.dimensions")
-            if curr_dim and curr_dim != settings.embed_dim_active:
-                g.query("DROP INDEX chunk_embedding IF EXISTS")
-    except Exception:
-        pass
-
+    check_embedding_model(g)
     for statement in SCHEMA:
         g.query(statement)
     return g

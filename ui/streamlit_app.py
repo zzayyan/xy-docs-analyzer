@@ -12,9 +12,18 @@ st.set_page_config(page_title="Docs Analyzer")
 st.title("Docs Analyzer")
 
 uploaded = st.file_uploader("Upload a document", type=FILE_TYPES)
+try:
+    limits = requests.get(f"{API_URL}/limits", timeout=10).json()
+    st.caption(f"Limits: {limits['max_upload_mb']} MB, {limits['max_pages']} PDF pages. "
+               "A PDF takes roughly 10-19 seconds per page to process.")
+except requests.RequestException:
+    st.caption("API not reachable")
+
 if uploaded and st.button("Process document", type="primary"):
     response = requests.post(f"{API_URL}/documents", files={"file": (uploaded.name, uploaded.getvalue())}, timeout=120)
-    response.raise_for_status()
+    if not response.ok:
+        st.error(response.json().get("detail", response.text))
+        st.stop()
     st.session_state.doc_id = response.json()["doc_id"]
     st.session_state.messages = []
 

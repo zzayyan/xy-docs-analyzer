@@ -1,9 +1,11 @@
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
 from langchain_core.documents import Document
 from langchain_neo4j import LLMGraphTransformer
 
+from app.config import settings
 from app.db import graph
 from app.models import llm
 
@@ -37,24 +39,33 @@ def entity_key(name: str) -> str:
     return " ".join(name.lower().split())
 
 
+def extract_one(text: str):
+    """One LLM call, no database access, so it is safe to run many at once."""
+    [doc] = transformer().convert_to_graph_documents([Document(page_content=text)])
+    return doc
+
+
 def extract_graph(file_id: str, chunks: list[dict], on_progress: Callable[[int, int], None] | None = None) -> None:
     """Extract entities and relationships per chunk and link each chunk to the entities it mentions."""
-    # ponytail: one LLM call per chunk, sequential; use aconvert_to_graph_documents with a semaphore if ingest is too slow
-    for done, chunk in enumerate(chunks, start=1):
-        [doc] = transformer().convert_to_graph_documents([Document(page_content=chunk["text"])])
+    # Extraction is one HTTP call per chunk, so it parallelises; the writes stay on this thread because
+    # concurrent MERGE on the same __Entity__ nodes deadlocks in Neo4j. map() keeps chunk order, and
+    # consuming it inside the pool interleaves writes with extraction so progress moves while work runs.
+    with ThreadPoolExecutor(max_workers=settings.llm_concurrency) as pool:
+        extracted = pool.map(extract_one, [chunk["text"] for chunk in chunks])
 
-        entities = {entity_key(n.id): {"key": entity_key(n.id), "name": n.id, "type": n.type} for n in doc.nodes}
-        # Relationship endpoints are not always listed in doc.nodes
-        for rel in doc.relationships:
-            for node in (rel.source, rel.target):
-                entities.setdefault(entity_key(node.id), {"key": entity_key(node.id), "name": node.id, "type": node.type})
-        relationships = [
-            {"source": entity_key(r.source.id), "target": entity_key(r.target.id), "type": r.type}
-            for r in doc.relationships
-        ]
+        for done, (chunk, doc) in enumerate(zip(chunks, extracted), start=1):
+            entities = {entity_key(n.id): {"key": entity_key(n.id), "name": n.id, "type": n.type} for n in doc.nodes}
+            # Relationship endpoints are not always listed in doc.nodes
+            for rel in doc.relationships:
+                for node in (rel.source, rel.target):
+                    entities.setdefault(entity_key(node.id), {"key": entity_key(node.id), "name": node.id, "type": node.type})
+            relationships = [
+                {"source": entity_key(r.source.id), "target": entity_key(r.target.id), "type": r.type}
+                for r in doc.relationships
+            ]
 
-        params = {"file_id": file_id, "chunk_id": chunk["id"]}
-        graph().query(WRITE_ENTITIES, {**params, "entities": list(entities.values())})
-        graph().query(WRITE_RELATIONSHIPS, {**params, "relationships": relationships})
-        if on_progress:
-            on_progress(done, len(chunks))
+            params = {"file_id": file_id, "chunk_id": chunk["id"]}
+            graph().query(WRITE_ENTITIES, {**params, "entities": list(entities.values())})
+            graph().query(WRITE_RELATIONSHIPS, {**params, "relationships": relationships})
+            if on_progress:
+                on_progress(done, len(chunks))
