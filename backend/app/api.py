@@ -1,14 +1,17 @@
+import json
 import tempfile
+import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app import store
 from app.config import settings
-from app.graph import workflow
+from app.graph import to_citations, workflow
 from app.ingest.convert import page_count
 from app.ingest.pipeline import create_file, ingest
 
@@ -214,3 +217,79 @@ def chat(body: ChatRequest) -> dict:
         citations=result["citations"], mode=file["mode"], complete=True,
     )
     return {"answer": result["answer"], "citations": result["citations"], "mode": file["mode"], "turn_id": turn["id"]}
+
+
+def sse(event: str, data: object) -> str:
+    # JSON-encode every payload, token strings included: a token containing a literal "\n" would
+    # otherwise split the SSE "data:" line and corrupt the frame. json.dumps of a plain str still
+    # produces a single-line quoted string, so this is correct for every event type below.
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+async def stream_answer(doc_id: str, question: str, mode: str) -> AsyncIterator[str]:
+    # Must be a real async generator over workflow.astream(), not a sync generator over
+    # workflow.stream(): a sync generator passed to StreamingResponse gets wrapped in
+    # iterate_in_threadpool, which calls next() on it from a worker thread with no way to
+    # interrupt that thread when the client disconnects -- nothing ever closes it, so the
+    # "complete: False on disconnect" behavior below silently never fires (confirmed empirically:
+    # killing a live client connection mid-stream left no Turn written after 17+ seconds). An
+    # async generator gets real asyncio.CancelledError propagation when uvicorn cancels the
+    # request task on disconnect, which is what actually makes the finally block below run promptly.
+    turn_id = str(uuid.uuid4())
+    answer_parts: list[str] = []
+    citations: list[dict] = []
+    complete = False
+    try:
+        async for kind, payload in workflow.astream({"question": question, "doc_id": doc_id, "mode": mode}, stream_mode=["updates", "messages"]):
+            if kind == "updates":
+                node, output = next(iter(payload.items()))
+                if node == "fuse":
+                    # contexts are final before generate ever runs, so citations can go out --
+                    # and the [n] markers become clickable -- before the first answer token
+                    citations = to_citations(output["contexts"])
+                    yield sse("citations", citations)
+                elif node != "generate":
+                    yield sse("status", {"node": node})
+            elif kind == "messages":
+                chunk, meta = payload
+                # kg_retrieve's entity extraction and tree_search's section choice also produce
+                # message chunks (both use structured output over the same LLM) -- without this
+                # filter their raw JSON streams into the user-visible answer. Empty chunks (a
+                # role-only first chunk, an empty stop chunk) are real but pointless to forward.
+                if meta.get("langgraph_node") != "generate" or not chunk.text:
+                    continue
+                answer_parts.append(chunk.text)
+                yield sse("token", chunk.text)
+        complete = True
+        yield sse("done", {"turn_id": turn_id})
+    except Exception as exc:
+        # Named "failed", not "error": EventSource reserves the name "error" for its own
+        # connection-level failures (fired through onerror, no JSON .data payload) -- a custom SSE
+        # event literally called "error" would collide with that on the client.
+        yield sse("failed", {"detail": str(exc)})
+    finally:
+        # Runs even if the client disconnects mid-stream: uvicorn cancels the request's asyncio
+        # Task, which raises CancelledError at whatever await this generator is suspended on
+        # (inside workflow.astream() or at our own yield) -- CancelledError is a BaseException, so
+        # `except Exception` above does not swallow it, and it keeps propagating after this block,
+        # as cancellation must. complete stays False in that case, so the partial answer is still
+        # visible in history rather than silently lost. Anchored on MATCH (f:File ...) inside
+        # save_turn, so a document deleted mid-answer makes this a no-op, not an orphaned Turn.
+        store.save_turn(
+            doc_id, question=question, answer="".join(answer_parts),
+            citations=citations, mode=mode, complete=complete, turn_id=turn_id,
+        )
+
+
+@app.get("/chat/stream")
+def chat_stream(doc_id: str, question: str) -> StreamingResponse:
+    # 404/409 are raised here, before StreamingResponse starts -- so "document not found" or "not
+    # ready" are still real HTTP status codes, not something buried inside a 200 event stream.
+    file = get_file(doc_id)
+    if file["status"] != "done":
+        raise HTTPException(status_code=409, detail=f"document is not ready (status: {file['status']})")
+    return StreamingResponse(
+        stream_answer(doc_id, question, file["mode"]),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

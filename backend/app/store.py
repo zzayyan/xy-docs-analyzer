@@ -86,12 +86,18 @@ def list_turns(file_id: str) -> list[dict]:
     return turns
 
 
-def save_turn(file_id: str, *, question: str, answer: str, citations: list[dict], mode: str, complete: bool) -> dict:
+def save_turn(
+    file_id: str, *, question: str, answer: str, citations: list[dict], mode: str, complete: bool,
+    turn_id: str | None = None,
+) -> dict:
     """Anchored on MATCH (f:File ...): if the document was deleted mid-answer this is a silent no-op
     rather than an orphaned Turn. Citations are JSON-encoded because Neo4j properties cannot hold a
     list of maps, and are stored denormalised (including chunk text) so history survives re-ingestion
-    or a chunk being deleted later."""
-    turn_id = str(uuid.uuid4())
+    or a chunk being deleted later.
+
+    turn_id can be supplied by the caller (the streaming endpoint mints it up front so it can be
+    sent in the SSE "done" event, before the turn is actually written in a finally block)."""
+    turn_id = turn_id or str(uuid.uuid4())
     graph().query(SAVE_TURN, {
         "id": turn_id, "file_id": file_id, "question": question, "answer": answer,
         "citations": json.dumps(citations), "mode": mode, "complete": complete,

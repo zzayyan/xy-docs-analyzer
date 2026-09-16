@@ -63,6 +63,9 @@ export interface Dict {
   chatClearConfirmTitle: string;
   chatClearConfirmBody: string;
   chatInterrupted: string;
+  chatStatusVectorRetrieve: string;
+  chatStatusTreeSearch: string;
+  chatStatusKgRetrieve: string;
 
   citationTitle: (n: number) => string;
   citationPages: string;
@@ -137,6 +140,9 @@ const en: Dict = {
   chatClearConfirmTitle: 'Clear chat history?',
   chatClearConfirmBody: 'All questions and answers for this document will be permanently removed.',
   chatInterrupted: 'Interrupted',
+  chatStatusVectorRetrieve: 'Searching the document…',
+  chatStatusTreeSearch: 'Reading the outline…',
+  chatStatusKgRetrieve: 'Reading the knowledge graph…',
 
   citationTitle: (n) => `Source [${n}]`,
   citationPages: 'Pages',
@@ -211,6 +217,9 @@ const id: Dict = {
   chatClearConfirmTitle: 'Hapus riwayat chat?',
   chatClearConfirmBody: 'Semua pertanyaan dan jawaban untuk dokumen ini akan dihapus permanen.',
   chatInterrupted: 'Terputus',
+  chatStatusVectorRetrieve: 'Mencari di dokumen…',
+  chatStatusTreeSearch: 'Membaca outline…',
+  chatStatusKgRetrieve: 'Membaca graf pengetahuan…',
 
   citationTitle: (n) => `Sumber [${n}]`,
   citationPages: 'Halaman',

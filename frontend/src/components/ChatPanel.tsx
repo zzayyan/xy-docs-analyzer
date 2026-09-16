@@ -6,6 +6,7 @@ import { Drawer } from './Drawer';
 import { MessageBody } from './MessageBody';
 import { Toast } from './Toast';
 import { api, ApiError, type Citation, type Turn } from '../lib/api';
+import { useChatStream } from '../lib/useChatStream';
 import { useLang } from '../lib/i18n';
 
 const SOURCE_LABEL_KEY = {
@@ -13,6 +14,12 @@ const SOURCE_LABEL_KEY = {
   tree: 'citationSourceTree',
   kg: 'citationSourceKg',
   kg_facts: 'citationSourceKgFacts',
+} as const;
+
+const STATUS_NODE_KEY = {
+  vector_retrieve: 'chatStatusVectorRetrieve',
+  tree_search: 'chatStatusTreeSearch',
+  kg_retrieve: 'chatStatusKgRetrieve',
 } as const;
 
 export function ChatPanel({ docId }: { docId: string }) {
@@ -24,14 +31,16 @@ export function ChatPanel({ docId }: { docId: string }) {
   const [toast, setToast] = useState<string | null>(null);
 
   const turnsQuery = useQuery({ queryKey: ['turns', docId], queryFn: () => api.listTurns(docId) });
-
-  const sendMutation = useMutation({
-    mutationFn: (question: string) => api.chat(docId, question),
-    onSuccess: () => {
-      setDraft('');
-      queryClient.invalidateQueries({ queryKey: ['turns', docId] });
+  // The backend persists a Turn in every case -- success, application failure, or a disconnect
+  // mid-stream (complete: false) -- so both callbacks refetch history the same way; only a
+  // failure additionally surfaces a toast.
+  const refetchTurns = () => queryClient.invalidateQueries({ queryKey: ['turns', docId] });
+  const stream = useChatStream(docId, {
+    onDone: refetchTurns,
+    onError: (message) => {
+      setToast(message);
+      refetchTurns();
     },
-    onError: (error: unknown) => setToast(error instanceof ApiError ? error.detail : t.errorGeneric),
   });
 
   const clearMutation = useMutation({
@@ -48,10 +57,13 @@ export function ChatPanel({ docId }: { docId: string }) {
 
   const send = () => {
     const question = draft.trim();
-    if (question && !sendMutation.isPending) sendMutation.mutate(question);
+    if (!question || stream.state.status === 'streaming') return;
+    setDraft('');
+    stream.send(question);
   };
 
   const turns = turnsQuery.data ?? [];
+  const streaming = stream.state.status === 'streaming';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', height: '100%' }}>
@@ -64,26 +76,21 @@ export function ChatPanel({ docId }: { docId: string }) {
       )}
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-        {turns.length === 0 && !turnsQuery.isPending ? (
+        {turns.length === 0 && !turnsQuery.isPending && !streaming ? (
           <p style={{ margin: 'var(--space-8) 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--fs-ui-sm)' }}>
             {t.chatEmpty}
           </p>
         ) : (
           turns.map((turn) => <TurnBubbles key={turn.id} turn={turn} onCitationClick={setSelectedCitation} />)
         )}
+        {streaming && <LiveBubble state={stream.state} onCitationClick={setSelectedCitation} />}
       </div>
 
       <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-        <Textarea
-          placeholder={t.chatPlaceholder}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          rows={2}
-          disabled={sendMutation.isPending}
-        />
+        <Textarea placeholder={t.chatPlaceholder} value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} disabled={streaming} />
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Button onClick={send} disabled={sendMutation.isPending || !draft.trim()}>
-            {sendMutation.isPending ? t.chatSending : t.chatSend}
+          <Button onClick={send} disabled={streaming || !draft.trim()}>
+            {streaming ? t.chatSending : t.chatSend}
           </Button>
         </div>
       </div>
@@ -106,6 +113,36 @@ export function ChatPanel({ docId }: { docId: string }) {
   );
 }
 
+const bubbleBase = {
+  alignSelf: 'flex-start' as const,
+  maxWidth: '90%',
+  background: 'var(--surface-card)',
+  border: 'var(--stroke-hairline) solid var(--border-subtle)',
+  borderRadius: 'var(--radius-md)',
+  padding: '14px 18px',
+  fontSize: 'var(--fs-ui-md)',
+  lineHeight: 'var(--lh-body)',
+  color: 'var(--text-body)',
+  display: 'flex' as const,
+  flexDirection: 'column' as const,
+  gap: 'var(--space-2)',
+};
+
+function LiveBubble({ state, onCitationClick }: { state: ReturnType<typeof useChatStream>['state']; onCitationClick: (c: Citation) => void }) {
+  const { t } = useLang();
+  const statusKey = state.statusNode && state.statusNode in STATUS_NODE_KEY ? STATUS_NODE_KEY[state.statusNode as keyof typeof STATUS_NODE_KEY] : null;
+
+  return (
+    <div style={bubbleBase}>
+      {state.answer ? (
+        <MessageBody text={state.answer} citations={state.citations} onCitationClick={onCitationClick} />
+      ) : (
+        <span style={{ color: 'var(--text-muted)' }}>{statusKey ? t[statusKey] : t.chatSending}</span>
+      )}
+    </div>
+  );
+}
+
 function TurnBubbles({ turn, onCitationClick }: { turn: Turn; onCitationClick: (c: Citation) => void }) {
   const { t } = useLang();
   return (
@@ -124,22 +161,7 @@ function TurnBubbles({ turn, onCitationClick }: { turn: Turn; onCitationClick: (
       >
         {turn.question}
       </div>
-      <div
-        style={{
-          alignSelf: 'flex-start',
-          maxWidth: '90%',
-          background: 'var(--surface-card)',
-          border: 'var(--stroke-hairline) solid var(--border-subtle)',
-          borderRadius: 'var(--radius-md)',
-          padding: '14px 18px',
-          fontSize: 'var(--fs-ui-md)',
-          lineHeight: 'var(--lh-body)',
-          color: 'var(--text-body)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--space-2)',
-        }}
-      >
+      <div style={bubbleBase}>
         {!turn.complete && <Badge tone="brand">{t.chatInterrupted}</Badge>}
         <MessageBody text={turn.answer} citations={turn.citations} onCitationClick={onCitationClick} />
         {turn.citations.length > 0 && (
