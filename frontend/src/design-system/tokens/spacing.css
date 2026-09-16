@@ -1,0 +1,32 @@
+:root{
+/* 4px base; the deck's real gutters are the larger steps */
+--space-0:0px;
+--space-1:4px;
+--space-2:8px;
+--space-3:12px;
+--space-4:16px;
+--space-5:20px;
+--space-6:24px;
+--space-8:32px;
+--space-10:40px;
+--space-12:48px;
+--space-16:64px;
+--space-18:73px;  /* deck left/right safe margin at 1920 */
+--space-20:80px;
+--space-24:96px;
+
+/* deck geometry (1920x1080) */
+--deck-w:1920px;
+--deck-h:1080px;
+--deck-margin-x:73px;
+--deck-title-y:69px;
+--deck-lead-y:151px;
+--deck-body-top:280px;
+--deck-col-gap:40px;
+
+/* app layout */
+--app-sidebar-w:264px;
+--app-topbar-h:60px;
+--container-max:1280px;
+--measure:68ch; /* @kind spacing */
+}

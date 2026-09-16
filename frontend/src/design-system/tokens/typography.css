@@ -1,0 +1,51 @@
+:root{
+/* families — Inter is the whole system; Montserrat Medium appears only in deck
+   footnotes/captions; Arial is the deck's in-card body face (kept for fidelity) */
+--font-core:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+--font-alt:"Montserrat","Inter",system-ui,sans-serif;
+--font-deck-card:Arial,Helvetica,"Inter",sans-serif;
+--font-mono:ui-monospace,"SFMono-Regular","Menlo","Consolas",monospace;
+
+/* weights actually used in the source deck */
+--fw-regular:400; /* @kind font */
+--fw-medium:500; /* @kind font */
+--fw-semibold:600; /* @kind font */
+--fw-bold:700; /* @kind font */
+
+/* scale — px values converted 1:1 from the 1920x1080 deck (pt x 1.333) */
+--fs-display:72px;   /* 54pt — cover / product statement */
+--fs-title:53px;     /* 40pt — slide + page section titles */
+--fs-lead:33px;      /* 25pt — deck subtitle / lead paragraph */
+--fs-h2:32px;        /* 24pt — block headings ("Business Impact") */
+--fs-h3:29px;        /* 21.7pt — card titles */
+--fs-body-lg:24px;   /* 18pt — deck body copy */
+--fs-body:22px;      /* 17pt — in-card body copy */
+--fs-pill:21px;      /* 16.2pt — tech-stack pills */
+--fs-small:18px;
+--fs-caption:16px;
+--fs-micro:13px;
+
+/* app-scale ramp (UI kits render at 1x, not deck scale) */
+--fs-ui-xl:28px;
+--fs-ui-lg:20px;
+--fs-ui-md:16px;
+--fs-ui-sm:14px;
+--fs-ui-xs:12px;
+
+--lh-tight:1.08; /* @kind font */
+--lh-heading:1.2; /* @kind font */
+--lh-snug:1.35; /* @kind font */
+--lh-body:1.5; /* @kind font */
+--lh-loose:1.65; /* @kind font */
+
+--ls-display:-0.02em; /* @kind font */
+--ls-title:-0.01em; /* @kind font */
+--ls-body:0em; /* @kind font */
+--ls-caps:0.08em; /* @kind font */
+
+/* semantic type aliases */
+--type-slide-title:var(--fw-bold) var(--fs-title)/var(--lh-heading) var(--font-core);
+--type-slide-lead:var(--fw-regular) var(--fs-lead)/var(--lh-snug) var(--font-core);
+--type-card-title:var(--fw-bold) var(--fs-h3)/var(--lh-snug) var(--font-deck-card);
+--type-card-body:var(--fw-regular) var(--fs-body)/var(--lh-body) var(--font-deck-card);
+}

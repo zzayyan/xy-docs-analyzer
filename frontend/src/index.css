@@ -1,0 +1,36 @@
+/* Global reset. All real styling lives in the XY Intelligence design-system tokens
+   (design-system/styles.css) and component inline styles — this file only sets up
+   the page itself. Dark is the only theme this app ships (see main.tsx), matching
+   the XYLM product console the design system's UI kit is modelled on. */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-core);
+  background: var(--surface-page);
+  color: var(--text-body);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+img {
+  max-width: 100%;
+}
+
+/* Backdrop for native <dialog> (see components/ConfirmDialog.tsx) — inline styles can't
+   reach ::backdrop, so this is the one global rule that isn't a design-system token. */
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+

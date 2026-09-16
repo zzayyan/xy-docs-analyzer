@@ -1,0 +1,29 @@
+:root{
+/* The source deck is deliberately flat: white cards, heavy red strokes, no shadow.
+   These elevation tokens exist for app surfaces only — keep them quiet. */
+--shadow-none:none;
+--shadow-sm:0 1px 2px rgba(2,2,2,.06);
+--shadow-md:0 4px 12px rgba(2,2,2,.08);
+--shadow-lg:0 12px 32px rgba(2,2,2,.10);
+--shadow-brand:0 8px 24px rgba(192,0,0,.18);
+--shadow-inset-hairline:inset 0 0 0 1px var(--border-subtle);
+
+/* protection gradient for text over the red wing imagery */
+--scrim-bottom:linear-gradient(to top,rgba(255,255,255,.96) 0%,rgba(255,255,255,0) 100%); /* @kind other */
+--scrim-left:linear-gradient(to right,rgba(255,255,255,.96) 0%,rgba(255,255,255,0) 60%); /* @kind other */
+
+--blur-panel:blur(12px); /* @kind other */
+--glass-panel:rgba(255,255,255,.72); /* @kind color */
+
+--ease-standard:cubic-bezier(.2,0,.2,1); /* @kind other */
+--ease-out:cubic-bezier(0,0,.2,1); /* @kind other */
+--dur-fast:120ms; /* @kind other */
+--dur-base:200ms; /* @kind other */
+--dur-slow:360ms; /* @kind other */
+
+/* --texture-dots / --texture-lines omitted: they point at deck background images
+   (assets/texture-dot-grid.jpg, texture-vertical-lines.jpg) not pulled into this app's
+   asset copy since no app screen uses deck-style textured backgrounds. Pull both the
+   token and the image the same way as the icons (see design-system/README.md) if a
+   screen needs them. */
+}

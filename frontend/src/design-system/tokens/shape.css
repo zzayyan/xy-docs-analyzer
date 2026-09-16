@@ -1,0 +1,15 @@
+:root{
+/* radii derived from the deck's roundRect adjustments */
+--radius-none:0px;
+--radius-sm:7px;    /* pills / tech-stack chips (adj 16667 on 43px) */
+--radius-md:10px;
+--radius-lg:18px;   /* feature cards (adj 7342 on 246px) */
+--radius-xl:24px;
+--radius-pill:999px;
+
+/* stroke weights — the deck is stroke-led, not shadow-led */
+--stroke-hairline:1px;
+--stroke-pill:1.5px;   /* 1pt outline on chips */
+--stroke-card:5px;     /* 4pt red outline on technology cards */
+--stroke-icon-ring:4px;
+}

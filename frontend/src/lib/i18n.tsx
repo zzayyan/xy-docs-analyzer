@@ -1,0 +1,182 @@
+import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+
+// Explicit shape (not inferred from `en` with `as const`) so `id`'s values can differ from
+// `en`'s while TypeScript still requires every key to be present — a missing Indonesian
+// string is a build error, not a silent fallback to English.
+export interface Dict {
+  appName: string;
+  navDocuments: string;
+  langEnglish: string;
+  langIndonesian: string;
+
+  uploadTitle: string;
+  uploadButton: string;
+  uploadUploading: string;
+  uploadLimitsCaption: (mb: number, pages: number) => string;
+  uploadLimitsUnavailable: string;
+
+  tableName: string;
+  tableStatus: string;
+  tableMode: string;
+  tableProgress: string;
+  tableUploaded: string;
+  tableActions: string;
+  tableEmpty: string;
+
+  statusQueued: string;
+  statusConverting: string;
+  statusEmbedding: string;
+  statusBuildingTree: string;
+  statusExtractingGraph: string;
+  statusDone: string;
+  statusError: string;
+
+  modeShort: string;
+  modeLong: string;
+  modeUnknown: string;
+
+  deleteAction: string;
+  deleteConfirmTitle: string;
+  deleteConfirmBody: (name: string) => string;
+  deleteConfirmConfirm: string;
+  deleteConfirmCancel: string;
+
+  relativeJustNow: string;
+
+  errorGeneric: string;
+}
+
+const en: Dict = {
+  appName: 'Docs Analyzer',
+  navDocuments: 'Documents',
+  langEnglish: 'EN',
+  langIndonesian: 'ID',
+
+  uploadTitle: 'Upload a document',
+  uploadButton: 'Upload',
+  uploadUploading: 'Uploading…',
+  uploadLimitsCaption: (mb: number, pages: number) =>
+    `Limit ${mb} MB, and ${pages} pages for PDF. Other formats are not page-limited.`,
+  uploadLimitsUnavailable: 'API not reachable',
+
+  tableName: 'Document',
+  tableStatus: 'Status',
+  tableMode: 'Mode',
+  tableProgress: 'Progress',
+  tableUploaded: 'Uploaded',
+  tableActions: 'Actions',
+  tableEmpty: 'No documents yet. Upload one to get started.',
+
+  statusQueued: 'Queued',
+  statusConverting: 'Converting',
+  statusEmbedding: 'Embedding',
+  statusBuildingTree: 'Building outline',
+  statusExtractingGraph: 'Extracting graph',
+  statusDone: 'Done',
+  statusError: 'Error',
+
+  modeShort: 'Short',
+  modeLong: 'Long',
+  modeUnknown: '—',
+
+  deleteAction: 'Delete',
+  deleteConfirmTitle: 'Delete this document?',
+  deleteConfirmBody: (name: string) =>
+    `"${name}" and everything derived from it — chunks, outline, chat history — will be permanently removed. This cannot be undone.`,
+  deleteConfirmConfirm: 'Delete',
+  deleteConfirmCancel: 'Cancel',
+
+  relativeJustNow: 'just now',
+
+  errorGeneric: 'Something went wrong. Please try again.',
+};
+
+const id: Dict = {
+  appName: 'Docs Analyzer',
+  navDocuments: 'Dokumen',
+  langEnglish: 'EN',
+  langIndonesian: 'ID',
+
+  uploadTitle: 'Unggah dokumen',
+  uploadButton: 'Unggah',
+  uploadUploading: 'Mengunggah…',
+  uploadLimitsCaption: (mb: number, pages: number) =>
+    `Batas ${mb} MB, dan ${pages} halaman untuk PDF. Format lain tidak dibatasi jumlah halaman.`,
+  uploadLimitsUnavailable: 'API tidak dapat dijangkau',
+
+  tableName: 'Dokumen',
+  tableStatus: 'Status',
+  tableMode: 'Mode',
+  tableProgress: 'Progres',
+  tableUploaded: 'Diunggah',
+  tableActions: 'Aksi',
+  tableEmpty: 'Belum ada dokumen. Unggah satu untuk memulai.',
+
+  statusQueued: 'Menunggu',
+  statusConverting: 'Mengonversi',
+  statusEmbedding: 'Membuat embedding',
+  statusBuildingTree: 'Membangun outline',
+  statusExtractingGraph: 'Mengekstrak graf',
+  statusDone: 'Selesai',
+  statusError: 'Gagal',
+
+  modeShort: 'Pendek',
+  modeLong: 'Panjang',
+  modeUnknown: '—',
+
+  deleteAction: 'Hapus',
+  deleteConfirmTitle: 'Hapus dokumen ini?',
+  deleteConfirmBody: (name: string) =>
+    `"${name}" beserta semua turunannya — chunk, outline, riwayat chat — akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.`,
+  deleteConfirmConfirm: 'Hapus',
+  deleteConfirmCancel: 'Batal',
+
+  relativeJustNow: 'baru saja',
+
+  errorGeneric: 'Terjadi kesalahan. Silakan coba lagi.',
+};
+
+const dictionaries = { en, id } as const;
+export type Lang = keyof typeof dictionaries;
+
+const STORAGE_KEY = 'docs-analyzer:lang';
+
+function initialLang(): Lang {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === 'en' || stored === 'id') return stored;
+  } catch {
+    // localStorage unavailable (private mode, etc.) — fall through to default
+  }
+  return 'en';
+}
+
+interface LangContextValue {
+  lang: Lang;
+  setLang: (lang: Lang) => void;
+  t: Dict;
+}
+
+const LangContext = createContext<LangContextValue | null>(null);
+
+export function LangProvider({ children }: { children: ReactNode }) {
+  const [lang, setLangState] = useState<Lang>(initialLang);
+
+  const setLang = (next: Lang) => {
+    setLangState(next);
+    try {
+      localStorage.setItem(STORAGE_KEY, next);
+    } catch {
+      // best-effort persistence only
+    }
+  };
+
+  const value = useMemo(() => ({ lang, setLang, t: dictionaries[lang] }), [lang]);
+  return <LangContext.Provider value={value}>{children}</LangContext.Provider>;
+}
+
+export function useLang(): LangContextValue {
+  const ctx = useContext(LangContext);
+  if (!ctx) throw new Error('useLang must be used within LangProvider');
+  return ctx;
+}

@@ -1,0 +1,6 @@
+/* XY Intelligence webfonts.
+   The source deck (XY.Pro.pptx) embeds Inter (Regular/Medium/SemiBold/Bold) and
+   Montserrat Medium as obfuscated Google-Slides .fntdata blobs, which are not
+   loadable as web fonts. Both families are the genuine originals and are served
+   from Google Fonts, so we load them from the Google CDN rather than substitute. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Montserrat:ital,wght@0,500;0,600;1,500&display=swap");
