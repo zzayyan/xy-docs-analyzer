@@ -13,7 +13,6 @@ dependencies = [
     "uvicorn[standard]",
     "python-multipart",
     "pydantic-settings",
-    "streamlit",
     "langchain-openai>=1.6.2",
 ]
 
