@@ -8,24 +8,26 @@ LUCENE_SPECIAL = re.compile(r'[+\-&|!(){}\[\]^"~*?:\\/]')
 VECTOR_QUERY = """
 CALL db.index.vector.queryNodes('chunk_embedding', $candidates, $vector) YIELD node, score
 WHERE node.file_id = $file_id
-RETURN node.id AS id, node.text AS text, node.pages AS pages
+RETURN node.id AS id, node.text AS text, node.pages AS pages, node.headings AS headings
 LIMIT $k
 """
 
 KEYWORD_QUERY = """
 CALL db.index.fulltext.queryNodes('chunk_text', $text) YIELD node, score
 WHERE node.file_id = $file_id
-RETURN node.id AS id, node.text AS text, node.pages AS pages
+RETURN node.id AS id, node.text AS text, node.pages AS pages, node.headings AS headings
 LIMIT $k
 """
+
+# The vector index is global across all files; candidates are filtered by file_id after retrieval, so once
+# several documents share the index a small candidate pool can return zero hits for the file being searched
+MIN_CANDIDATES = 500
 
 
 def search(file_id: str, question: str, k: int = 6) -> list[dict]:
     """Hybrid search over one file's chunks: vector + fulltext, merged with reciprocal rank fusion."""
-    # ponytail: vector index is global, filtered after top-N; raise candidates or use
-    # Neo4j 2025+ filtered vector search once many files share the index
     ranked_lists = [graph().query(VECTOR_QUERY, {
-        "candidates": k * 10,
+        "candidates": max(k * 10, MIN_CANDIDATES),
         "vector": embeddings().embed_query(question),
         "file_id": file_id,
         "k": k,

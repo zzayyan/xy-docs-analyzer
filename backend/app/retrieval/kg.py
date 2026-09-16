@@ -32,7 +32,7 @@ EVIDENCE_QUERY = """
 MATCH (c:Chunk {file_id: $file_id})-[:MENTIONS]->(e:__Entity__)
 WHERE e.key IN $keys
 WITH c, count(DISTINCT e) AS hits
-RETURN c.id AS id, c.text AS text, c.pages AS pages
+RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings
 ORDER BY hits DESC, c.idx
 LIMIT $k
 """

@@ -46,7 +46,7 @@ def kg_retrieve(state: State) -> dict:
     retrieved = [{**c, "source": "kg"} for c in chunks]
     if facts:
         text = "Knowledge graph facts:\n" + "\n".join(facts)
-        retrieved.insert(0, {"id": "kg:facts", "text": text, "pages": [], "source": "kg_facts"})
+        retrieved.insert(0, {"id": "kg:facts", "text": text, "pages": [], "headings": [], "source": "kg_facts"})
     return {"retrieved": retrieved}
 
 
@@ -66,6 +66,22 @@ def fuse(state: State) -> dict:
     return {"contexts": contexts}
 
 
+def to_citations(contexts: list[dict]) -> list[dict]:
+    """Citation entries for the frontend: includes chunk text so drill-down needs no extra lookup, and
+    survives a chunk being deleted or re-ingested later (used both live and when persisting chat history)."""
+    return [
+        {
+            "n": n,
+            "chunk_id": c["id"],
+            "pages": c["pages"],
+            "headings": c.get("headings") or [],
+            "source": c["source"],
+            "text": c["text"],
+        }
+        for n, c in enumerate(contexts, start=1)
+    ]
+
+
 def generate(state: State) -> dict:
     contexts = state.get("contexts", [])
     blocks = "\n\n".join(
@@ -75,11 +91,7 @@ def generate(state: State) -> dict:
         ("system", SYSTEM_PROMPT),
         ("human", f"Context:\n{blocks}\n\nQuestion: {state['question']}"),
     ])
-    citations = [
-        {"n": n, "chunk_id": c["id"], "pages": c["pages"], "source": c["source"]}
-        for n, c in enumerate(contexts, start=1)
-    ]
-    return {"answer": message.content, "citations": citations}
+    return {"answer": message.content, "citations": to_citations(contexts)}
 
 
 builder = StateGraph(State)
