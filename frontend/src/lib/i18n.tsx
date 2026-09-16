@@ -44,6 +44,35 @@ export interface Dict {
   relativeJustNow: string;
 
   errorGeneric: string;
+
+  docBackToList: string;
+  docElapsedLabel: string;
+  docEtaLabel: (eta: string) => string;
+  docStepCount: (done: number, total: number) => string;
+  unitPages: string;
+  unitChunks: string;
+  unitSections: string;
+  docErrorTitle: string;
+  docErrorReupload: string;
+
+  chatPlaceholder: string;
+  chatSend: string;
+  chatSending: string;
+  chatEmpty: string;
+  chatClear: string;
+  chatClearConfirmTitle: string;
+  chatClearConfirmBody: string;
+  chatInterrupted: string;
+
+  citationTitle: (n: number) => string;
+  citationPages: string;
+  citationHeadings: string;
+  citationSourceVector: string;
+  citationSourceTree: string;
+  citationSourceKg: string;
+  citationSourceKgFacts: string;
+  citationClose: string;
+  citationNone: string;
 }
 
 const en: Dict = {
@@ -89,6 +118,35 @@ const en: Dict = {
   relativeJustNow: 'just now',
 
   errorGeneric: 'Something went wrong. Please try again.',
+
+  docBackToList: '← Back to documents',
+  docElapsedLabel: 'Elapsed',
+  docEtaLabel: (eta) => `~${eta} remaining`,
+  docStepCount: (done, total) => `${done} / ${total}`,
+  unitPages: 'pages',
+  unitChunks: 'chunks',
+  unitSections: 'sections',
+  docErrorTitle: 'Ingest failed',
+  docErrorReupload: 'This document could not be processed. Delete it and upload the original file again.',
+
+  chatPlaceholder: 'Ask about this document…',
+  chatSend: 'Send',
+  chatSending: 'Thinking…',
+  chatEmpty: 'No questions yet. Ask something about this document.',
+  chatClear: 'Clear chat',
+  chatClearConfirmTitle: 'Clear chat history?',
+  chatClearConfirmBody: 'All questions and answers for this document will be permanently removed.',
+  chatInterrupted: 'Interrupted',
+
+  citationTitle: (n) => `Source [${n}]`,
+  citationPages: 'Pages',
+  citationHeadings: 'Section',
+  citationSourceVector: 'Vector search',
+  citationSourceTree: 'Document outline',
+  citationSourceKg: 'Knowledge graph evidence',
+  citationSourceKgFacts: 'Knowledge graph facts',
+  citationClose: 'Close',
+  citationNone: '—',
 };
 
 const id: Dict = {
@@ -134,6 +192,35 @@ const id: Dict = {
   relativeJustNow: 'baru saja',
 
   errorGeneric: 'Terjadi kesalahan. Silakan coba lagi.',
+
+  docBackToList: '← Kembali ke daftar dokumen',
+  docElapsedLabel: 'Berlalu',
+  docEtaLabel: (eta) => `~${eta} lagi`,
+  docStepCount: (done, total) => `${done} / ${total}`,
+  unitPages: 'halaman',
+  unitChunks: 'chunk',
+  unitSections: 'bagian',
+  docErrorTitle: 'Proses gagal',
+  docErrorReupload: 'Dokumen ini gagal diproses. Hapus dan unggah ulang berkas aslinya.',
+
+  chatPlaceholder: 'Tanya tentang dokumen ini…',
+  chatSend: 'Kirim',
+  chatSending: 'Memikirkan…',
+  chatEmpty: 'Belum ada pertanyaan. Tanyakan sesuatu tentang dokumen ini.',
+  chatClear: 'Hapus riwayat',
+  chatClearConfirmTitle: 'Hapus riwayat chat?',
+  chatClearConfirmBody: 'Semua pertanyaan dan jawaban untuk dokumen ini akan dihapus permanen.',
+  chatInterrupted: 'Terputus',
+
+  citationTitle: (n) => `Sumber [${n}]`,
+  citationPages: 'Halaman',
+  citationHeadings: 'Bagian',
+  citationSourceVector: 'Pencarian vektor',
+  citationSourceTree: 'Outline dokumen',
+  citationSourceKg: 'Bukti graf pengetahuan',
+  citationSourceKgFacts: 'Fakta graf pengetahuan',
+  citationClose: 'Tutup',
+  citationNone: '—',
 };
 
 const dictionaries = { en, id } as const;

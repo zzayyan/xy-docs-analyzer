@@ -3,32 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge, Button, DataTable, ProgressBar } from '../design-system';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Toast } from '../components/Toast';
-import { api, ApiError, isInFlight, type Document, type DocumentStatus } from '../lib/api';
+import { api, ApiError, isInFlight, type Document } from '../lib/api';
 import { formatRelative } from '../lib/format';
+import { STATUS_TONE, statusLabel } from '../lib/status';
 import { useLang } from '../lib/i18n';
-import type { Dict } from '../lib/i18n';
-
-const STATUS_TONE: Record<DocumentStatus, 'brand' | 'accent' | 'secure' | 'neutral'> = {
-  queued: 'neutral',
-  converting: 'accent',
-  embedding: 'accent',
-  building_tree: 'accent',
-  extracting_graph: 'accent',
-  done: 'secure',
-  error: 'brand',
-};
-
-function statusLabel(status: DocumentStatus, t: Dict): string {
-  return {
-    queued: t.statusQueued,
-    converting: t.statusConverting,
-    embedding: t.statusEmbedding,
-    building_tree: t.statusBuildingTree,
-    extracting_graph: t.statusExtractingGraph,
-    done: t.statusDone,
-    error: t.statusError,
-  }[status];
-}
 
 export function DocumentsScreen() {
   const { t, lang } = useLang();
@@ -76,7 +54,12 @@ export function DocumentsScreen() {
 
   const rows = documents.map((doc) => ({
     name: (
-      <span style={{ fontWeight: 'var(--fw-medium)', color: 'var(--text-title)' }}>{doc.name}</span>
+      <a
+        href={`#/doc/${doc.id}`}
+        style={{ fontWeight: 'var(--fw-medium)', color: 'var(--text-title)', textDecoration: 'none' }}
+      >
+        {doc.name}
+      </a>
     ),
     status: (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)', minWidth: 140 }}>
