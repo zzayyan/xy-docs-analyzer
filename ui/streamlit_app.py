@@ -1,4 +1,4 @@
-"""Streamlit client for the Docs Analyzer API. Run the API first: uv run uvicorn app.api:app"""
+"""Streamlit client for the Docs Analyzer API. Run the API first: cd backend && uv run uvicorn app.api:app"""
 import os
 import time
 
