@@ -1,13 +1,16 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Badge } from '../design-system';
+import { Alert, Badge, Tabs } from '../design-system';
 import { ChatPanel } from '../components/ChatPanel';
 import { IngestProgress } from '../components/IngestProgress';
+import { OutlinePanel } from '../components/OutlinePanel';
 import { api, isInFlight } from '../lib/api';
 import { STATUS_TONE, statusLabel } from '../lib/status';
 import { useLang } from '../lib/i18n';
 
 export function DocumentScreen({ docId }: { docId: string }) {
   const { t } = useLang();
+  const [tab, setTab] = useState(0);
 
   const documentQuery = useQuery({
     queryKey: ['document', docId],
@@ -55,7 +58,16 @@ export function DocumentScreen({ docId }: { docId: string }) {
             </Alert>
           )}
 
-          {doc.status === 'done' && (
+          {doc.status === 'done' && doc.mode === 'long' && (
+            <>
+              <Tabs tabs={[t.tabChat, t.tabOutline]} activeIndex={tab} onChange={setTab} />
+              <div style={{ flex: 1, minHeight: 400 }}>
+                {tab === 0 ? <ChatPanel docId={doc.id} /> : <OutlinePanel docId={doc.id} />}
+              </div>
+            </>
+          )}
+
+          {doc.status === 'done' && doc.mode !== 'long' && (
             <div style={{ flex: 1, minHeight: 400 }}>
               <ChatPanel docId={doc.id} />
             </div>

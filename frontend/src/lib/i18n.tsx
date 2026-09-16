@@ -76,6 +76,14 @@ export interface Dict {
   citationSourceKgFacts: string;
   citationClose: string;
   citationNone: string;
+
+  tabChat: string;
+  tabOutline: string;
+  outlineEmpty: string;
+  outlineSelectSection: string;
+  outlinePageRange: (start: number, end: number) => string;
+  outlineChunkCount: (n: number) => string;
+  outlineChunksEmpty: string;
 }
 
 const en: Dict = {
@@ -153,6 +161,14 @@ const en: Dict = {
   citationSourceKgFacts: 'Knowledge graph facts',
   citationClose: 'Close',
   citationNone: '—',
+
+  tabChat: 'Chat',
+  tabOutline: 'Outline',
+  outlineEmpty: 'No outline available for this document.',
+  outlineSelectSection: 'Select a section to view its content.',
+  outlinePageRange: (start, end) => (start === end ? `p. ${start}` : `p. ${start}–${end}`),
+  outlineChunkCount: (n) => `${n} chunk${n === 1 ? '' : 's'}`,
+  outlineChunksEmpty: 'This section has no text of its own — see its subsections.',
 };
 
 const id: Dict = {
@@ -230,6 +246,14 @@ const id: Dict = {
   citationSourceKgFacts: 'Fakta graf pengetahuan',
   citationClose: 'Tutup',
   citationNone: '—',
+
+  tabChat: 'Chat',
+  tabOutline: 'Daftar Isi',
+  outlineEmpty: 'Tidak ada outline untuk dokumen ini.',
+  outlineSelectSection: 'Pilih bagian untuk melihat isinya.',
+  outlinePageRange: (start, end) => (start === end ? `hal. ${start}` : `hal. ${start}–${end}`),
+  outlineChunkCount: (n) => `${n} chunk`,
+  outlineChunksEmpty: 'Bagian ini tidak punya teks sendiri — lihat sub-bagiannya.',
 };
 
 const dictionaries = { en, id } as const;
