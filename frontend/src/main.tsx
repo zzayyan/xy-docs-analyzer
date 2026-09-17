@@ -6,9 +6,10 @@ import './index.css';
 import { LangProvider } from './lib/i18n';
 import App from './App.tsx';
 
-// data-theme is set once, statically: the design system's product surfaces (the XYLM
-// console this app's shell is modelled on) are dark-only, there is no light/dark toggle.
-document.documentElement.dataset.theme = 'dark';
+// No data-theme attribute set: colors.css's :root already holds the design system's light
+// palette (the deck-derived default), so this is the light theme without any override. The
+// dark product-console palette lives behind [data-theme="dark"] in the same file if a toggle
+// is ever added back.
 
 const queryClient = new QueryClient({
   defaultOptions: {

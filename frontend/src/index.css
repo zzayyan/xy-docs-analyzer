@@ -1,7 +1,7 @@
 /* Global reset. All real styling lives in the XY Intelligence design-system tokens
    (design-system/styles.css) and component inline styles — this file only sets up
-   the page itself. Dark is the only theme this app ships (see main.tsx), matching
-   the XYLM product console the design system's UI kit is modelled on. */
+   the page itself. Light is the theme this app ships (see main.tsx) — colors.css's
+   :root palette, no data-theme override. */
 * {
   box-sizing: border-box;
 }
