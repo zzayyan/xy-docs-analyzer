@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import app.api as api_module
 import app.store as store_module
+import app.table as table_module
 from app.api import app
 
 client = TestClient(app)
@@ -30,9 +31,14 @@ def stubbed(monkeypatch):
         return row
 
     monkeypatch.setattr(store_module, "get_file", lambda doc_id: fake_document(doc_id))
-    monkeypatch.setattr(store_module, "list_chunks", lambda file_id: [
-        {"id": "f:0", "text": "text", "pages": [1], "headings": []},
-    ])
+    reads: list[int | None] = []
+
+    def list_chunks(file_id: str, limit: int | None = None) -> list[dict]:
+        reads.append(limit)
+        return [{"id": "f:0", "text": "text", "pages": [1], "headings": []}]
+
+    monkeypatch.setattr(store_module, "list_chunks", list_chunks)
+    monkeypatch.setattr(store_module, "chunk_reads", reads, raising=False)
     monkeypatch.setattr(store_module, "create_table_extraction", create_table_extraction)
     monkeypatch.setattr(store_module, "set_table_extraction", lambda table_id, **props: tables[table_id].update(props))
     monkeypatch.setattr(store_module, "list_table_extractions", lambda file_id: list(tables.values()))
@@ -42,7 +48,8 @@ def stubbed(monkeypatch):
 
 def test_propose_returns_columns_and_stores_nothing(stubbed, monkeypatch):
     seen = {}
-    monkeypatch.setattr(api_module, "propose_columns", lambda request, model: seen.update(request=request, model=model) or COLUMNS)
+    monkeypatch.setattr(store_module, "list_sections", lambda file_id: [])
+    monkeypatch.setattr(api_module, "propose_columns", lambda request, model, context: seen.update(request=request, model=model) or COLUMNS)
 
     response = client.post("/documents/d1/tables/propose", json={"request": "setiap kewajiban"})
 
@@ -120,3 +127,44 @@ def test_a_blank_or_repeated_column_name_is_refused_before_the_run_starts(stubbe
     })
     assert repeated.status_code == 400
     assert stubbed == {}, "nothing is stored and no run starts"
+
+
+def test_propose_sends_the_documents_own_context_to_the_model(stubbed, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(store_module, "list_sections", lambda file_id: [{"id": "s0", "title": "Bab I"}])
+    monkeypatch.setattr(api_module, "propose_columns", lambda request, model, context: seen.update(context=context) or COLUMNS)
+
+    response = client.post("/documents/d1/tables/propose", json={"request": "setiap kewajiban"})
+
+    assert response.status_code == 200
+    assert "Bab I" in seen["context"] and "text" in seen["context"]
+    # The whole point of the limit: a 200-page document is not read in full to name three columns
+    assert store_module.chunk_reads == [table_module.CONTEXT_CHUNKS]
+
+
+def test_suggest_returns_candidate_tables_from_the_document_alone(stubbed, monkeypatch):
+    suggestions = [{"title": "Kewajiban", "columns": COLUMNS}]
+    monkeypatch.setattr(store_module, "list_sections", lambda file_id: [])
+    monkeypatch.setattr(api_module, "suggest_tables", lambda context, model: suggestions)
+
+    response = client.post("/documents/d1/tables/suggest")
+
+    assert response.status_code == 200
+    assert response.json() == {"tables": suggestions}
+    assert stubbed == {}, "a suggestion is not a Table Extraction yet"
+
+
+def test_suggest_is_409_while_the_document_is_still_ingesting(stubbed, monkeypatch):
+    monkeypatch.setattr(store_module, "get_file", lambda doc_id: fake_document(doc_id, status="converting"))
+    assert client.post("/documents/d1/tables/suggest").status_code == 409
+
+
+def test_suggest_is_404_for_an_unknown_document(stubbed, monkeypatch):
+    monkeypatch.setattr(store_module, "get_file", lambda doc_id: None)
+    assert client.post("/documents/nope/tables/suggest").status_code == 404
+
+
+def test_propose_is_409_while_the_document_is_still_ingesting(stubbed, monkeypatch):
+    # Chunks are what the proposal reads; mid-ingest there is nothing to read yet
+    monkeypatch.setattr(store_module, "get_file", lambda doc_id: fake_document(doc_id, status="embedding"))
+    assert client.post("/documents/d1/tables/propose", json={"request": "q"}).status_code == 409

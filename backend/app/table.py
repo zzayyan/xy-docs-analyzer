@@ -10,11 +10,28 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.models import llm
 
+# How much of the document is shown when proposing columns: enough to pick up its own wording,
+# small enough to prepend to a single call. Sections come from the outline, so only long documents
+# have them; the opening chunks are what a short document has instead.
+CONTEXT_SECTIONS = 40
+CONTEXT_SECTION_CHARS = 80
+CONTEXT_CHUNKS = 5
+CONTEXT_CHUNK_CHARS = 600
+
 PROPOSE_SYSTEM = (
     "You design the columns of a table from a plain-language request. Propose between two and six "
     "columns, each with a short name and a one-sentence description of what belongs in it. Name and "
-    "describe the columns in the same language as the request. Do not invent columns the request "
-    "does not ask for."
+    "describe the columns in the same language as the request. Where the document quoted below "
+    "already has a word for something, use that word. Do not invent columns the request does not ask "
+    "for."
+)
+
+SUGGEST_SYSTEM = (
+    "You propose tables worth pulling out of a document, from an outline and a few passages of it. "
+    "Give three tables: things the document lists over and over -- obligations, parties, dates, "
+    "amounts, articles -- not a summary of it. Each table has a short title and between two and six "
+    "columns, each column with a short name and a one-sentence description. Title and name them in "
+    "the language of the document."
 )
 
 EXTRACT_SYSTEM = (
@@ -35,6 +52,15 @@ class ProposedColumns(BaseModel):
     columns: list[Column]
 
 
+class SuggestedTable(BaseModel):
+    title: str = Field(description="Short title for this table")
+    columns: list[Column]
+
+
+class SuggestedTables(BaseModel):
+    tables: list[SuggestedTable]
+
+
 class ExtractedRow(BaseModel):
     values: list[str] = Field(description="One value per column, in the order the columns are listed")
 
@@ -43,12 +69,40 @@ class ChunkRows(BaseModel):
     rows: list[ExtractedRow]
 
 
-def propose_columns(request: str, model: str | None = None) -> list[dict]:
+def document_context(sections: list[dict], chunks: list[dict]) -> str:
+    """A short, bounded picture of one document: its outline, then its opening chunks.
+
+    Every part is capped, so a document with hundreds of long headings cannot crowd out the request
+    this context is prepended to. Pure text assembly, so the callers holding the Neo4j rows decide
+    what to read."""
+    parts = []
+    if sections:
+        titles = "\n".join(f"- {s['title'][:CONTEXT_SECTION_CHARS]}" for s in sections[:CONTEXT_SECTIONS])
+        parts.append(f"Outline:\n{titles}")
+    if chunks:
+        quoted = "\n\n".join(c["text"][:CONTEXT_CHUNK_CHARS] for c in chunks[:CONTEXT_CHUNKS])
+        parts.append(f"Passages:\n{quoted}")
+    return "\n\n".join(parts)
+
+
+def propose_columns(request: str, model: str | None = None, context: str = "") -> list[dict]:
+    """context is the document the columns are for (see document_context); without it the model is
+    guessing names from the request's wording alone."""
+    described = f"{context}\n\nRequest:\n{request}" if context else request
     proposed = llm(model).with_structured_output(ProposedColumns).invoke([
         ("system", PROPOSE_SYSTEM),
-        ("human", request),
+        ("human", described),
     ])
     return [column.model_dump() for column in proposed.columns]
+
+
+def suggest_tables(context: str, model: str | None = None) -> list[dict]:
+    """Tables worth extracting from this document, for a user who has not typed a request yet."""
+    suggested = llm(model).with_structured_output(SuggestedTables).invoke([
+        ("system", SUGGEST_SYSTEM),
+        ("human", context),
+    ])
+    return [suggestion.model_dump() for suggestion in suggested.tables]
 
 
 def extract_one(text: str, columns: list[dict], model: str | None) -> ChunkRows:

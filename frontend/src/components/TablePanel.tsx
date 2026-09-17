@@ -4,7 +4,7 @@ import { Alert, Button, DataTable, ProgressBar } from '../design-system';
 import { ErrorDetail } from './ErrorDetail';
 import { SourcePanel } from './SourcePanel';
 import { Toast } from './Toast';
-import { api, ApiError, type Citation, type Column, type TableExtraction } from '../lib/api';
+import { api, ApiError, type Citation, type Column, type SuggestedTable, type TableExtraction } from '../lib/api';
 import { formatRelative } from '../lib/format';
 import { useLang, type Lang } from '../lib/i18n';
 
@@ -41,6 +41,11 @@ export function TablePanel({ docId }: { docId: string }) {
   });
 
   const fail = (error: unknown) => setToast(error instanceof ApiError ? error.detail : t.errorGeneric);
+
+  const suggestMutation = useMutation({
+    mutationFn: () => api.suggestTables(docId),
+    onError: fail,
+  });
 
   const proposeMutation = useMutation({
     mutationFn: () => api.proposeColumns(docId, request.trim()),
@@ -118,6 +123,33 @@ export function TablePanel({ docId }: { docId: string }) {
                 </div>
               </div>
 
+              {!editing && !suggestMutation.data && (
+                <div>
+                  <button
+                    className="quiet-button"
+                    onClick={() => suggestMutation.mutate()}
+                    disabled={suggestMutation.isPending}
+                  >
+                    {suggestMutation.isPending ? t.tableSuggesting : t.tableSuggestAction}
+                  </button>
+                </div>
+              )}
+
+              {!editing && suggestMutation.data?.tables.length === 0 && (
+                <p style={{ margin: 0, color: 'var(--text-muted)' }}>{t.tableSuggestionsEmpty}</p>
+              )}
+
+              {!editing && suggestMutation.data && suggestMutation.data.tables.length > 0 && (
+                <Suggestions
+                  tables={suggestMutation.data.tables}
+                  onPick={(suggestion) => {
+                    setRequest(suggestion.title);
+                    setColumns(suggestion.columns);
+                    suggestMutation.reset();
+                  }}
+                />
+              )}
+
               {editing && (
                 <ColumnEditor
                   columns={columns}
@@ -145,6 +177,28 @@ export function TablePanel({ docId }: { docId: string }) {
       {selected && <SourcePanel citation={selected.citation} onClose={() => setSelected(null)} />}
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
     </div>
+  );
+}
+
+function Suggestions({ tables, onPick }: { tables: SuggestedTable[]; onPick: (table: SuggestedTable) => void }) {
+  const { t } = useLang();
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <h3 style={{ margin: 0, fontSize: 'var(--fs-ui-xs)', fontWeight: 'var(--fw-semibold)', color: 'var(--text-muted)' }}>
+        {t.tableSuggestionsTitle}
+      </h3>
+      {tables.map((table, index) => (
+        <button
+          key={index}
+          className="suggestion"
+          style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+          onClick={() => onPick(table)}
+        >
+          <span style={{ fontWeight: 'var(--fw-medium)', color: 'var(--text-title)' }}>{table.title}</span>
+          <span style={{ color: 'var(--text-muted)' }}>{table.columns.map((c) => c.name).join(' · ')}</span>
+        </button>
+      ))}
+    </section>
   );
 }
 

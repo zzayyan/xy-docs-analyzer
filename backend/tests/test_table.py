@@ -98,3 +98,66 @@ def test_propose_columns_returns_name_and_description_per_column(monkeypatch):
         {"name": "Kewajiban", "description": "The obligation"},
     ]
     assert "setiap kewajiban dan tenggatnya" in seen["messages"][-1][1]
+
+
+SECTIONS = [{"title": f"Bab {i} " + "j" * 400, "id": f"s{i}"} for i in range(60)]
+
+
+def test_document_context_carries_outline_titles_and_chunk_text_and_stays_bounded():
+    chunks = [{"id": f"f:{i}", "text": f"isi {i} " + "x" * 5000, "pages": [i], "headings": []} for i in range(20)]
+
+    context = table.document_context(SECTIONS, chunks)
+
+    assert "Bab 0" in context and "isi 0" in context
+    assert "j" * 400 not in context, "a long heading is truncated"
+    assert "Bab 59" not in context, "the outline is truncated"
+    assert "isi 19" not in context, "only the first chunks are used"
+    assert len(context) < 10000, f"context is {len(context)} characters, too long to prepend to every proposal"
+
+
+def test_document_context_of_a_short_document_is_its_chunks_alone():
+    # A short document has no sections, so the passages are all the context there is
+    context = table.document_context([], [{"id": "f:0", "text": "isi", "pages": [1], "headings": []}])
+
+    assert "isi" in context
+
+
+def test_propose_columns_passes_the_document_context_to_the_model(monkeypatch):
+    seen = {}
+
+    class FakeModel:
+        def with_structured_output(self, schema):
+            return self
+
+        def invoke(self, messages):
+            seen["messages"] = messages
+            return table.ProposedColumns(columns=[table.Column(name="Pasal", description="Nomor pasal")])
+
+    monkeypatch.setattr(table, "llm", lambda model=None: FakeModel())
+
+    table.propose_columns("setiap kewajiban", model=None, context="Outline:\n- Bab I Ketentuan Umum")
+
+    prompt = "\n".join(text for _, text in seen["messages"])
+    assert "Bab I Ketentuan Umum" in prompt
+    assert "setiap kewajiban" in prompt
+
+
+def test_suggest_tables_returns_candidate_tables_with_their_columns(monkeypatch):
+    seen = {}
+
+    class FakeModel:
+        def with_structured_output(self, schema):
+            return self
+
+        def invoke(self, messages):
+            seen["messages"] = messages
+            return table.SuggestedTables(tables=[
+                table.SuggestedTable(title="Kewajiban", columns=[table.Column(name="Pasal", description="Nomor pasal")]),
+            ])
+
+    monkeypatch.setattr(table, "llm", lambda model=None: FakeModel())
+
+    assert table.suggest_tables("Outline:\n- Bab I", model=None) == [
+        {"title": "Kewajiban", "columns": [{"name": "Pasal", "description": "Nomor pasal"}]},
+    ]
+    assert "Bab I" in "\n".join(text for _, text in seen["messages"])

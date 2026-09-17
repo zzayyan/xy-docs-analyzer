@@ -11,12 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app import store
+from app import store, table
 from app.config import settings
 from app.graph import to_citations, workflow
 from app.ingest.convert import page_count
 from app.ingest.pipeline import create_file, ingest, set_status
-from app.table import Column, propose_columns
+from app.table import Column, document_context, propose_columns, suggest_tables
 from app.table import run as run_table
 
 READ_CHUNK = 1024 * 1024
@@ -83,6 +83,15 @@ class ProposeRequest(BaseModel):
 
 class ProposedColumns(BaseModel):
     columns: list[Column]
+
+
+class SuggestedTable(BaseModel):
+    title: str
+    columns: list[Column]
+
+
+class SuggestedTables(BaseModel):
+    tables: list[SuggestedTable]
 
 
 class TableRequest(BaseModel):
@@ -298,18 +307,37 @@ def checked_columns(columns: list[Column]) -> list[dict]:
     return named
 
 
+def ready_document(doc_id: str) -> dict:
+    """A document whose chunks exist: anything that reads them has nothing to read until ingest is done."""
+    file = get_file(doc_id)
+    if file["status"] != "done":
+        raise HTTPException(status_code=409, detail=f"document is not ready (status: {file['status']})")
+    return file
+
+
+def table_context(doc_id: str) -> str:
+    """What the document looks like, for a proposal to name its columns after."""
+    return document_context(store.list_sections(doc_id), store.list_chunks(doc_id, limit=table.CONTEXT_CHUNKS))
+
+
 @app.post("/documents/{doc_id}/tables/propose", response_model=ProposedColumns)
 def propose_table_columns(doc_id: str, body: ProposeRequest) -> dict:
     """Proposes columns for the user to edit; nothing is stored until the run is created."""
-    file = get_file(doc_id)
-    return {"columns": propose_columns(body.request, file.get("llm_model"))}
+    file = ready_document(doc_id)
+    return {"columns": propose_columns(body.request, file.get("llm_model"), context=table_context(doc_id))}
+
+
+@app.post("/documents/{doc_id}/tables/suggest", response_model=SuggestedTables)
+def suggest_document_tables(doc_id: str) -> dict:
+    """Tables worth pulling out of this document, for a user who has not typed a request yet. A POST,
+    not a GET: it is an LLM call each time, so it runs when the user asks for it rather than on load."""
+    file = ready_document(doc_id)
+    return {"tables": suggest_tables(table_context(doc_id), file.get("llm_model"))}
 
 
 @app.post("/documents/{doc_id}/tables", response_model=TableExtraction)
 def create_table_extraction(doc_id: str, body: TableRequest, background: BackgroundTasks) -> dict:
-    file = get_file(doc_id)
-    if file["status"] != "done":
-        raise HTTPException(status_code=409, detail=f"document is not ready (status: {file['status']})")
+    file = ready_document(doc_id)
     columns = checked_columns(body.columns)
     extraction = store.create_table_extraction(doc_id, body.request, columns)
     background.add_task(extract_table, doc_id, extraction["id"], columns, file.get("llm_model"))

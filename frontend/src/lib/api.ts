@@ -96,6 +96,11 @@ export interface Row {
   citations: Citation[];
 }
 
+export interface SuggestedTable {
+  title: string;
+  columns: Column[];
+}
+
 export type TableStatus = 'queued' | 'running' | 'done' | 'error';
 
 export interface TableExtraction {
@@ -174,6 +179,9 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ request: prompt }),
     }),
+
+  suggestTables: (docId: string) =>
+    request<{ tables: SuggestedTable[] }>(`/documents/${docId}/tables/suggest`, { method: 'POST' }),
 
   createTable: (docId: string, tableRequest: string, columns: Column[]) =>
     request<TableExtraction>(`/documents/${docId}/tables`, {

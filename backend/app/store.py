@@ -46,6 +46,10 @@ RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings
 ORDER BY c.idx
 """
 
+# Same rows as ALL_CHUNKS, but for callers that only need the opening of the document (proposing
+# columns), so a 200-page document is not read in full for a single prompt.
+FIRST_CHUNKS = ALL_CHUNKS + "LIMIT $limit"
+
 # Columns and rows are JSON-encoded for the same reason citations are: a Neo4j property cannot hold
 # a list of maps.
 CREATE_TABLE_EXTRACTION = """
@@ -141,8 +145,10 @@ def clear_turns(file_id: str) -> None:
     graph().query(CLEAR_TURNS, {"file_id": file_id})
 
 
-def list_chunks(file_id: str) -> list[dict]:
-    return graph().query(ALL_CHUNKS, {"file_id": file_id})
+def list_chunks(file_id: str, limit: int | None = None) -> list[dict]:
+    if limit is None:
+        return graph().query(ALL_CHUNKS, {"file_id": file_id})
+    return graph().query(FIRST_CHUNKS, {"file_id": file_id, "limit": limit})
 
 
 def _table_extraction(row: dict) -> dict:

@@ -95,6 +95,10 @@ export interface Dict {
   tableIntro: string;
   tablePlaceholder: string;
   tableProposeAction: string;
+  tableSuggestAction: string;
+  tableSuggesting: string;
+  tableSuggestionsTitle: string;
+  tableSuggestionsEmpty: string;
   tableProposing: string;
   tableColumnsTitle: string;
   tableColumnName: string;
@@ -211,6 +215,10 @@ const en: Dict = {
   tableIntro: 'Describe what to pull out of this document, and the columns are proposed for you to edit.',
   tablePlaceholder: 'e.g. every obligation, its due date and amount',
   tableProposeAction: 'Propose columns',
+  tableSuggestAction: 'Suggest tables from this document',
+  tableSuggesting: 'Reading the document...',
+  tableSuggestionsTitle: 'Tables worth pulling out of this document',
+  tableSuggestionsEmpty: 'No table suggested itself from this document. Describe one yourself above.',
   tableProposing: 'Proposing columns...',
   tableColumnsTitle: 'Columns',
   tableColumnName: 'Name',
@@ -327,6 +335,10 @@ const id: Dict = {
   tableIntro: 'Jelaskan apa yang ingin diambil dari dokumen ini, lalu kolomnya diusulkan untuk Anda sunting.',
   tablePlaceholder: 'mis. setiap kewajiban, tenggat, dan nilainya',
   tableProposeAction: 'Usulkan kolom',
+  tableSuggestAction: 'Sarankan tabel dari dokumen ini',
+  tableSuggesting: 'Membaca dokumen...',
+  tableSuggestionsTitle: 'Tabel yang layak diambil dari dokumen ini',
+  tableSuggestionsEmpty: 'Tidak ada tabel yang tersarankan dari dokumen ini. Jelaskan sendiri di atas.',
   tableProposing: 'Menyusun kolom...',
   tableColumnsTitle: 'Kolom',
   tableColumnName: 'Nama',

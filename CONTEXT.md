@@ -64,6 +64,11 @@ _Avoid_: Annotation, selection
 A user-requested pass over a whole document that produces a table of every matching item.
 _Avoid_: Extraction (alone), structured extraction, data extraction
 
+**Suggested Table**:
+A table the model proposes from the document alone, before the user has described one: a title and
+its columns, offered as a starting point to edit.
+_Avoid_: Template, preset
+
 **Column**:
 One field a table extraction collects, defined by a name and a description; proposed by the
 model from the user's request and edited by the user before the run.
