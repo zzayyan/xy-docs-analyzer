@@ -78,3 +78,14 @@ dialog::backdrop {
   50% { opacity: 1; }
 }
 
+/* "Searching the document…" style status line shown before the first answer token arrives
+   (ChatPanel.tsx's LiveBubble) -- a plain static line reads as stalled, not working. */
+.chat-status-pulse {
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-status-pulse {
+    animation: none;
+  }
+}
+

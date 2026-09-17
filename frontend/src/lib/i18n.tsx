@@ -65,6 +65,7 @@ export interface Dict {
   chatSend: string;
   chatSending: string;
   chatEmpty: string;
+  chatTurnCount: (n: number) => string;
   chatClear: string;
   chatClearConfirmTitle: string;
   chatClearConfirmBody: string;
@@ -156,6 +157,7 @@ const en: Dict = {
   chatSend: 'Send',
   chatSending: 'Thinking…',
   chatEmpty: 'No questions yet. Ask something about this document.',
+  chatTurnCount: (n) => (n === 1 ? '1 question asked' : `${n} questions asked`),
   chatClear: 'Clear chat',
   chatClearConfirmTitle: 'Clear chat history?',
   chatClearConfirmBody: 'All questions and answers for this document will be permanently removed.',
@@ -247,6 +249,7 @@ const id: Dict = {
   chatSend: 'Kirim',
   chatSending: 'Memikirkan…',
   chatEmpty: 'Belum ada pertanyaan. Tanyakan sesuatu tentang dokumen ini.',
+  chatTurnCount: (n) => (n === 1 ? '1 pertanyaan diajukan' : `${n} pertanyaan diajukan`),
   chatClear: 'Hapus riwayat',
   chatClearConfirmTitle: 'Hapus riwayat chat?',
   chatClearConfirmBody: 'Semua pertanyaan dan jawaban untuk dokumen ini akan dihapus permanen.',

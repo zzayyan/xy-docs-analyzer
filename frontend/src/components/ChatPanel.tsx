@@ -16,6 +16,19 @@ const SOURCE_LABEL_KEY = {
   kg_facts: 'citationSourceKgFacts',
 } as const;
 
+/** Short human hint for a citation pill -- "[1]" alone told you nothing about what it pointed
+ * to. Prefer the deepest heading (what section), fall back to a page range, else nothing. */
+function citationShortLabel(c: Citation): string {
+  if (c.headings.length > 0) {
+    const heading = c.headings[c.headings.length - 1];
+    return heading.length > 28 ? `${heading.slice(0, 28)}…` : heading;
+  }
+  if (c.pages.length > 0) {
+    return c.pages.length === 1 ? `p. ${c.pages[0]}` : `p. ${c.pages[0]}–${c.pages[c.pages.length - 1]}`;
+  }
+  return '';
+}
+
 const STATUS_NODE_KEY = {
   vector_retrieve: 'chatStatusVectorRetrieve',
   tree_search: 'chatStatusTreeSearch',
@@ -68,8 +81,11 @@ export function ChatPanel({ docId }: { docId: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', height: '100%' }}>
       {turns.length > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Button variant="ghost" size="sm" onClick={() => setConfirmClear(true)}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
+          <span style={{ fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>
+            {t.chatTurnCount(turns.length)}
+          </span>
+          <Button variant="ghost" size="sm" onClick={() => setConfirmClear(true)} style={{ color: 'var(--text-muted)' }}>
             {t.chatClear}
           </Button>
         </div>
@@ -137,7 +153,7 @@ function LiveBubble({ state, onCitationClick }: { state: ReturnType<typeof useCh
       {state.answer ? (
         <MessageBody text={state.answer} citations={state.citations} onCitationClick={onCitationClick} />
       ) : (
-        <span style={{ color: 'var(--text-muted)' }}>{statusKey ? t[statusKey] : t.chatSending}</span>
+        <span className="chat-status-pulse" style={{ color: 'var(--text-muted)' }}>{statusKey ? t[statusKey] : t.chatSending}</span>
       )}
     </div>
   );
@@ -166,11 +182,16 @@ function TurnBubbles({ turn, onCitationClick }: { turn: Turn; onCitationClick: (
         <MessageBody text={turn.answer} citations={turn.citations} onCitationClick={onCitationClick} />
         {turn.citations.length > 0 && (
           <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', marginTop: 'var(--space-2)' }}>
-            {turn.citations.map((c) => (
-              <Pill key={c.n} size="sm" tone="soft" style={{ cursor: 'pointer' }}>
-                <span onClick={() => onCitationClick(c)}>[{c.n}]</span>
-              </Pill>
-            ))}
+            {turn.citations.map((c) => {
+              const label = citationShortLabel(c);
+              return (
+                <Pill key={c.n} size="sm" tone="soft" style={{ cursor: 'pointer' }}>
+                  <span onClick={() => onCitationClick(c)}>
+                    [{c.n}]{label && ` ${label}`}
+                  </span>
+                </Pill>
+              );
+            })}
           </div>
         )}
       </div>

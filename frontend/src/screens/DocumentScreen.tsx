@@ -8,11 +8,12 @@ import { IngestProgress } from '../components/IngestProgress';
 import { OutlinePanel } from '../components/OutlinePanel';
 import { Toast } from '../components/Toast';
 import { api, ApiError, isInFlight } from '../lib/api';
+import { formatRelative } from '../lib/format';
 import { STATUS_TONE, statusLabel } from '../lib/status';
 import { useLang } from '../lib/i18n';
 
 export function DocumentScreen({ docId }: { docId: string }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -54,11 +55,18 @@ export function DocumentScreen({ docId }: { docId: string }) {
 
       {doc && (
         <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-            <h1 style={{ margin: 0, fontSize: 'var(--fs-ui-xl)', fontWeight: 'var(--fw-bold)', color: 'var(--text-title)' }}>
-              {doc.name}
-            </h1>
-            <Badge tone={STATUS_TONE[doc.status]}>{statusLabel(doc.status, t)}</Badge>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+              <h1 style={{ margin: 0, fontSize: 'var(--fs-ui-xl)', fontWeight: 'var(--fw-bold)', color: 'var(--text-title)' }}>
+                {doc.name}
+              </h1>
+              <Badge tone={STATUS_TONE[doc.status]}>{statusLabel(doc.status, t)}</Badge>
+            </div>
+            <div style={{ display: 'flex', gap: 'var(--space-3)', fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>
+              <span>{doc.mode === 'long' ? t.modeLong : doc.mode === 'short' ? t.modeShort : t.modeUnknown}</span>
+              {doc.created_at && <span>{formatRelative(doc.created_at, lang, t.relativeJustNow)}</span>}
+              {doc.chunks !== null && <span>{t.outlineChunkCount(doc.chunks)}</span>}
+            </div>
           </div>
 
           {isInFlight(doc.status) && (
@@ -84,14 +92,18 @@ export function DocumentScreen({ docId }: { docId: string }) {
           {doc.status === 'done' && doc.mode === 'long' && (
             <>
               <Tabs tabs={[t.tabChat, t.tabOutline]} activeIndex={tab} onChange={setTab} />
-              <div style={{ flex: 1, minHeight: 400 }}>
+              {/* minHeight: 400 alone doesn't stop this box from growing past the viewport --
+                  minHeight: 0 + overflow: hidden is what lets it actually shrink to the space
+                  main has left, so ChatPanel's own internal scroll region (not the whole page)
+                  is what scrolls and the composer stays pinned at the bottom. */}
+              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
                 {tab === 0 ? <ChatPanel docId={doc.id} /> : <OutlinePanel docId={doc.id} />}
               </div>
             </>
           )}
 
           {doc.status === 'done' && doc.mode !== 'long' && (
-            <div style={{ flex: 1, minHeight: 400 }}>
+            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
               <ChatPanel docId={doc.id} />
             </div>
           )}

@@ -37,7 +37,7 @@ function App() {
         </div>
         <LanguageSwitch />
       </header>
-      <main style={{ flex: 1, minHeight: 0, padding: 'var(--space-8) var(--space-6)' }}>
+      <main style={{ flex: 1, minHeight: 0, padding: 'var(--space-8) var(--space-6)', overflow: 'auto' }}>
         {docMatch ? <DocumentScreen docId={docMatch[1]} /> : <DocumentsScreen />}
       </main>
     </div>
