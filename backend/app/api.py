@@ -16,6 +16,8 @@ from app.config import settings
 from app.graph import to_citations, workflow
 from app.ingest.convert import page_count
 from app.ingest.pipeline import create_file, ingest, set_status
+from app.table import Column, propose_columns
+from app.table import run as run_table
 
 READ_CHUNK = 1024 * 1024
 
@@ -75,6 +77,19 @@ class Document(BaseModel):
     has_original: bool = False
 
 
+class ProposeRequest(BaseModel):
+    request: str
+
+
+class ProposedColumns(BaseModel):
+    columns: list[Column]
+
+
+class TableRequest(BaseModel):
+    request: str
+    columns: list[Column]
+
+
 class Citation(BaseModel):
     n: int
     chunk_id: str
@@ -109,6 +124,23 @@ class Chunk(BaseModel):
     text: str
     pages: list[int]
     headings: list[str]
+
+
+class Row(BaseModel):
+    values: dict[str, str]
+    citations: list[Citation]
+
+
+class TableExtraction(BaseModel):
+    id: str
+    request: str
+    columns: list[Column]
+    rows: list[Row]
+    status: str
+    progress: float
+    error: str | None = None
+    created_at: int
+    updated_at: int
 
 
 class Turn(BaseModel):
@@ -233,6 +265,70 @@ def document_sections(doc_id: str) -> list[dict]:
 def document_section_chunks(doc_id: str, section_id: str) -> list[dict]:
     get_file(doc_id)
     return store.section_chunks(doc_id, section_id)
+
+
+def extract_table(doc_id: str, table_id: str, columns: list[dict], model: str | None) -> None:
+    """The run itself, as a background task: minutes of LLM calls over every chunk, with its progress
+    and its outcome kept on the TableExtraction so the user can leave the tab and come back.
+
+    Like ingest, this occupies one of Starlette's sync worker threads for the whole run, and nothing
+    caps how many runs a document can have in flight at once."""
+    try:
+        store.set_table_extraction(table_id, status="running")
+        rows = run_table(
+            store.list_chunks(doc_id), columns, model,
+            on_progress=lambda done, total: store.set_table_extraction(table_id, progress=round(done / total, 3)),
+        )
+        store.set_table_extraction(table_id, status="done", progress=1.0, rows=rows)
+    except Exception as exc:
+        # The columns are left untouched, so the user can retry the same table without redefining it
+        store.set_table_extraction(table_id, status="error", error=str(exc))
+
+
+def checked_columns(columns: list[Column]) -> list[dict]:
+    """A run is minutes of LLM calls over the whole document, so the columns are checked before it
+    starts rather than after. Names key each row's values, so a blank or repeated name would silently
+    drop a column's cells instead of failing."""
+    named = [{"name": c.name.strip(), "description": c.description.strip()} for c in columns]
+    names = [c["name"] for c in named]
+    if not names or not all(names):
+        raise HTTPException(status_code=400, detail="every column needs a name")
+    if len(set(names)) != len(names):
+        raise HTTPException(status_code=400, detail="column names must be unique")
+    return named
+
+
+@app.post("/documents/{doc_id}/tables/propose", response_model=ProposedColumns)
+def propose_table_columns(doc_id: str, body: ProposeRequest) -> dict:
+    """Proposes columns for the user to edit; nothing is stored until the run is created."""
+    file = get_file(doc_id)
+    return {"columns": propose_columns(body.request, file.get("llm_model"))}
+
+
+@app.post("/documents/{doc_id}/tables", response_model=TableExtraction)
+def create_table_extraction(doc_id: str, body: TableRequest, background: BackgroundTasks) -> dict:
+    file = get_file(doc_id)
+    if file["status"] != "done":
+        raise HTTPException(status_code=409, detail=f"document is not ready (status: {file['status']})")
+    columns = checked_columns(body.columns)
+    extraction = store.create_table_extraction(doc_id, body.request, columns)
+    background.add_task(extract_table, doc_id, extraction["id"], columns, file.get("llm_model"))
+    return extraction
+
+
+@app.get("/documents/{doc_id}/tables", response_model=list[TableExtraction])
+def list_table_extractions(doc_id: str) -> list[dict]:
+    get_file(doc_id)
+    return store.list_table_extractions(doc_id)
+
+
+@app.get("/documents/{doc_id}/tables/{table_id}", response_model=TableExtraction)
+def document_table_extraction(doc_id: str, table_id: str) -> dict:
+    get_file(doc_id)
+    extraction = store.get_table_extraction(doc_id, table_id)
+    if extraction is None:
+        raise HTTPException(status_code=404, detail="table extraction not found")
+    return extraction
 
 
 @app.get("/documents/{doc_id}/turns", response_model=list[Turn])

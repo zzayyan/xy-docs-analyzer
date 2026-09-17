@@ -1,4 +1,4 @@
-"""Read and delete Cypher for File/Section/Chunk/Turn, kept out of app/api.py so routing and queries
+"""Read and delete Cypher for File/Section/Chunk/Turn/TableExtraction, kept out of app/api.py so routing and queries
 don't tangle. Writes made during ingest stay in app/ingest/pipeline.py, app/ingest/tree.py, app/ingest/kg.py."""
 import json
 import uuid
@@ -21,6 +21,7 @@ DELETE_FILE_CASCADE = [
     "MATCH (n:Section {file_id: $id}) DETACH DELETE n",
     "MATCH (n:__Entity__ {file_id: $id}) DETACH DELETE n",
     "MATCH (n:Turn {file_id: $id}) DETACH DELETE n",
+    "MATCH (n:TableExtraction {file_id: $id}) DETACH DELETE n",
     "MATCH (f:File {id: $id}) DETACH DELETE f",
 ]
 
@@ -38,6 +39,34 @@ MATCH (c:Chunk {file_id: $file_id})-[:IN_SECTION]->(:Section {id: $section_id, f
 RETURN c.id AS id, c.idx AS idx, c.text AS text, c.pages AS pages, c.headings AS headings
 ORDER BY c.idx
 """
+
+ALL_CHUNKS = """
+MATCH (c:Chunk {file_id: $file_id})
+RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings
+ORDER BY c.idx
+"""
+
+# Columns and rows are JSON-encoded for the same reason citations are: a Neo4j property cannot hold
+# a list of maps.
+CREATE_TABLE_EXTRACTION = """
+MATCH (f:File {id: $file_id})
+CREATE (f)-[:HAS_TABLE]->(:TableExtraction {
+    id: $id, file_id: $file_id, request: $request, columns: $columns, rows: '[]',
+    status: 'queued', progress: 0.0, created_at: timestamp(), updated_at: timestamp()
+})
+"""
+
+SET_TABLE_EXTRACTION = "MATCH (e:TableExtraction {id: $id}) SET e += $props, e.updated_at = timestamp()"
+
+# Rows are left out on purpose: the list is a history sidebar, and a document's rows can run to
+# thousands of chunk quotes each. Open one to get its rows, through GET_TABLE_EXTRACTION.
+LIST_TABLE_EXTRACTIONS = """
+MATCH (e:TableExtraction {file_id: $file_id})
+RETURN e {.id, .request, .columns, .status, .progress, .error, .created_at, .updated_at} AS extraction
+ORDER BY e.created_at DESC
+"""
+
+GET_TABLE_EXTRACTION = "MATCH (e:TableExtraction {id: $id, file_id: $file_id}) RETURN e {.*} AS extraction"
 
 LIST_TURNS = """
 MATCH (t:Turn {file_id: $file_id})
@@ -110,3 +139,36 @@ def save_turn(
 
 def clear_turns(file_id: str) -> None:
     graph().query(CLEAR_TURNS, {"file_id": file_id})
+
+
+def list_chunks(file_id: str) -> list[dict]:
+    return graph().query(ALL_CHUNKS, {"file_id": file_id})
+
+
+def _table_extraction(row: dict) -> dict:
+    return {**row, "columns": json.loads(row["columns"]), "rows": json.loads(row.get("rows") or "[]")}
+
+
+def create_table_extraction(file_id: str, request: str, columns: list[dict]) -> dict:
+    """Anchored on MATCH (f:File ...), so a document deleted first leaves no orphaned TableExtraction."""
+    extraction_id = str(uuid.uuid4())
+    graph().query(CREATE_TABLE_EXTRACTION, {
+        "id": extraction_id, "file_id": file_id, "request": request, "columns": json.dumps(columns),
+    })
+    return get_table_extraction(file_id, extraction_id)
+
+
+def set_table_extraction(extraction_id: str, **props) -> None:
+    if "rows" in props:
+        props["rows"] = json.dumps(props["rows"])
+    graph().query(SET_TABLE_EXTRACTION, {"id": extraction_id, "props": props})
+
+
+def list_table_extractions(file_id: str) -> list[dict]:
+    rows = graph().query(LIST_TABLE_EXTRACTIONS, {"file_id": file_id})
+    return [_table_extraction(row["extraction"]) for row in rows]
+
+
+def get_table_extraction(file_id: str, extraction_id: str) -> dict | None:
+    rows = graph().query(GET_TABLE_EXTRACTION, {"id": extraction_id, "file_id": file_id})
+    return _table_extraction(rows[0]["extraction"]) if rows else None

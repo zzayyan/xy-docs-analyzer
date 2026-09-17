@@ -7,6 +7,7 @@ const SOURCE_LABEL_KEY = {
   tree: 'citationSourceTree',
   kg: 'citationSourceKg',
   kg_facts: 'citationSourceKgFacts',
+  table: 'citationSourceTable',
 } as const;
 
 /** Docked beside the conversation instead of a modal overlay, so the answer that cites it stays

@@ -1,0 +1,94 @@
+"""Table Extraction: a user-described table pulled out of every chunk of one document.
+
+Column proposal and the per-chunk read are both structured output over the document's own model
+(prior art: app/retrieval/kg.py). Persistence lives in app/store.py, orchestration in app/api.py."""
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+
+from pydantic import BaseModel, Field
+
+from app.config import settings
+from app.models import llm
+
+PROPOSE_SYSTEM = (
+    "You design the columns of a table from a plain-language request. Propose between two and six "
+    "columns, each with a short name and a one-sentence description of what belongs in it. Name and "
+    "describe the columns in the same language as the request. Do not invent columns the request "
+    "does not ask for."
+)
+
+EXTRACT_SYSTEM = (
+    "You extract table rows from one passage of a document. Return one row per item in the passage "
+    "that matches the columns, and no rows at all if the passage has none. Give one value per column, "
+    "in the order the columns are listed. Quote each value exactly as the passage writes it, in the "
+    "language of the passage -- do not translate, summarise or infer. Leave a value empty when the "
+    "passage does not state it."
+)
+
+
+class Column(BaseModel):
+    name: str = Field(description="Short column name")
+    description: str = Field(default="", description="What belongs in this column")
+
+
+class ProposedColumns(BaseModel):
+    columns: list[Column]
+
+
+class ExtractedRow(BaseModel):
+    values: list[str] = Field(description="One value per column, in the order the columns are listed")
+
+
+class ChunkRows(BaseModel):
+    rows: list[ExtractedRow]
+
+
+def propose_columns(request: str, model: str | None = None) -> list[dict]:
+    proposed = llm(model).with_structured_output(ProposedColumns).invoke([
+        ("system", PROPOSE_SYSTEM),
+        ("human", request),
+    ])
+    return [column.model_dump() for column in proposed.columns]
+
+
+def extract_one(text: str, columns: list[dict], model: str | None) -> ChunkRows:
+    """One LLM call, no database access, so it is safe to run many at once."""
+    listed = "\n".join(f"{i}. {c['name']}: {c['description']}" for i, c in enumerate(columns, start=1))
+    return llm(model).with_structured_output(ChunkRows).invoke([
+        ("system", EXTRACT_SYSTEM),
+        ("human", f"Columns:\n{listed}\n\nPassage:\n{text}"),
+    ])
+
+
+def run(
+    chunks: list[dict], columns: list[dict], model: str | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> list[dict]:
+    """Read every chunk and return the rows found, each citing the chunk it came from.
+
+    Rows keep chunk order, and a chunk the model fails on fails the whole run: a partial table would
+    silently claim to cover the whole document. Chunks already submitted when one fails still finish,
+    since the pool is drained on exit -- a failed run costs a whole document's worth of calls. Merging
+    items found in more than one chunk is a separate ticket, so one item mentioned twice is still two
+    rows here."""
+    rows: list[dict] = []
+    # One HTTP call per chunk, so it parallelises; map() keeps chunk order however the calls interleave.
+    with ThreadPoolExecutor(max_workers=settings.llm_concurrency) as pool:
+        extracted = pool.map(lambda chunk: extract_one(chunk["text"], columns, model), chunks)
+
+        for done, (chunk, found) in enumerate(zip(chunks, extracted), start=1):
+            citation = {
+                "n": 1, "chunk_id": chunk["id"], "pages": chunk["pages"],
+                "headings": chunk.get("headings") or [], "source": "table", "text": chunk["text"],
+            }
+            for row in found.rows:
+                # The model can return fewer values than there are columns; a column it skipped is
+                # a value the document does not state, which is an empty cell rather than a shift.
+                values = [v.strip() for v in row.values] + [""] * len(columns)
+                rows.append({
+                    "values": {c["name"]: v for c, v in zip(columns, values)},
+                    "citations": [dict(citation)],
+                })
+            if on_progress:
+                on_progress(done, len(chunks))
+    return rows

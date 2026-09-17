@@ -45,7 +45,7 @@ export interface Citation {
   chunk_id: string;
   pages: number[];
   headings: string[];
-  source: 'vector' | 'tree' | 'kg' | 'kg_facts';
+  source: 'vector' | 'tree' | 'kg' | 'kg_facts' | 'table';
   text: string;
 }
 
@@ -84,6 +84,30 @@ export interface Turn {
   mode: 'short' | 'long';
   complete: boolean;
   created_at: number;
+}
+
+export interface Column {
+  name: string;
+  description: string;
+}
+
+export interface Row {
+  values: Record<string, string>;
+  citations: Citation[];
+}
+
+export type TableStatus = 'queued' | 'running' | 'done' | 'error';
+
+export interface TableExtraction {
+  id: string;
+  request: string;
+  columns: Column[];
+  rows: Row[];
+  status: TableStatus;
+  progress: number;
+  error: string | null;
+  created_at: number;
+  updated_at: number;
 }
 
 export class ApiError extends Error {
@@ -143,6 +167,24 @@ export const api = {
   listTurns: (id: string) => request<Turn[]>(`/documents/${id}/turns`),
 
   clearTurns: (id: string) => request<void>(`/documents/${id}/turns`, { method: 'DELETE' }),
+
+  proposeColumns: (docId: string, prompt: string) =>
+    request<{ columns: Column[] }>(`/documents/${docId}/tables/propose`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request: prompt }),
+    }),
+
+  createTable: (docId: string, tableRequest: string, columns: Column[]) =>
+    request<TableExtraction>(`/documents/${docId}/tables`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request: tableRequest, columns }),
+    }),
+
+  listTables: (docId: string) => request<TableExtraction[]>(`/documents/${docId}/tables`),
+
+  getTable: (docId: string, tableId: string) => request<TableExtraction>(`/documents/${docId}/tables/${tableId}`),
 
   chat: (docId: string, question: string) =>
     request<ChatResponse>('/chat', {

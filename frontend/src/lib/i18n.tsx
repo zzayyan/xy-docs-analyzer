@@ -80,6 +80,7 @@ export interface Dict {
   citationSourceTree: string;
   citationSourceKg: string;
   citationSourceKgFacts: string;
+  citationSourceTable: string;
   citationClose: string;
 
   tabChat: string;
@@ -89,6 +90,32 @@ export interface Dict {
   outlinePageRange: (start: number, end: number) => string;
   outlineChunkCount: (n: number) => string;
   outlineChunksEmpty: string;
+
+  tabTable: string;
+  tableIntro: string;
+  tablePlaceholder: string;
+  tableProposeAction: string;
+  tableProposing: string;
+  tableColumnsTitle: string;
+  tableColumnName: string;
+  tableColumnDescription: string;
+  tableColumnAdd: string;
+  tableColumnRemove: string;
+  tableRunAction: string;
+  tableRunningTitle: string;
+  tableRunningHint: string;
+  tableProgress: (percent: number) => string;
+  tableRowCount: (n: number) => string;
+  tableCitationsLabel: string;
+  tableNothingFound: string;
+  tableErrorTitle: string;
+  tableRetry: string;
+  tableHistoryTitle: string;
+  tableNewAction: string;
+  tableStatusQueued: string;
+  tableStatusRunning: string;
+  tableStatusDone: string;
+  tableStatusError: string;
 }
 
 const en: Dict = {
@@ -169,6 +196,7 @@ const en: Dict = {
   citationSourceTree: 'Document outline',
   citationSourceKg: 'Knowledge graph evidence',
   citationSourceKgFacts: 'Knowledge graph facts',
+  citationSourceTable: 'Table extraction',
   citationClose: 'Close',
 
   tabChat: 'Chat',
@@ -178,6 +206,32 @@ const en: Dict = {
   outlinePageRange: (start, end) => (start === end ? `p. ${start}` : `p. ${start}-${end}`),
   outlineChunkCount: (n) => `${n} chunk${n === 1 ? '' : 's'}`,
   outlineChunksEmpty: 'This section has no text of its own. Its subsections hold the content.',
+
+  tabTable: 'Table',
+  tableIntro: 'Describe what to pull out of this document, and the columns are proposed for you to edit.',
+  tablePlaceholder: 'e.g. every obligation, its due date and amount',
+  tableProposeAction: 'Propose columns',
+  tableProposing: 'Proposing columns...',
+  tableColumnsTitle: 'Columns',
+  tableColumnName: 'Name',
+  tableColumnDescription: 'What belongs in this column',
+  tableColumnAdd: 'Add column',
+  tableColumnRemove: 'Remove',
+  tableRunAction: 'Run table extraction',
+  tableRunningTitle: 'Reading every chunk of the document',
+  tableRunningHint: 'This takes a while. You can leave this tab; the run keeps going.',
+  tableProgress: (percent) => `${percent}% read`,
+  tableRowCount: (n) => `${n} row${n === 1 ? '' : 's'}`,
+  tableCitationsLabel: 'Citations',
+  tableNothingFound: 'Nothing in this document matched these columns.',
+  tableErrorTitle: 'The table extraction failed',
+  tableRetry: 'Run again',
+  tableHistoryTitle: 'Earlier table extractions',
+  tableNewAction: 'New table',
+  tableStatusQueued: 'Queued',
+  tableStatusRunning: 'Running',
+  tableStatusDone: 'Done',
+  tableStatusError: 'Failed',
 };
 
 const id: Dict = {
@@ -258,6 +312,7 @@ const id: Dict = {
   citationSourceTree: 'Daftar isi dokumen',
   citationSourceKg: 'Bukti graf pengetahuan',
   citationSourceKgFacts: 'Fakta graf pengetahuan',
+  citationSourceTable: 'Ekstraksi tabel',
   citationClose: 'Tutup',
 
   tabChat: 'Chat',
@@ -267,6 +322,32 @@ const id: Dict = {
   outlinePageRange: (start, end) => (start === end ? `hal. ${start}` : `hal. ${start}-${end}`),
   outlineChunkCount: (n) => `${n} chunk`,
   outlineChunksEmpty: 'Bagian ini tidak punya teks sendiri. Isinya ada di sub-bagian.',
+
+  tabTable: 'Tabel',
+  tableIntro: 'Jelaskan apa yang ingin diambil dari dokumen ini, lalu kolomnya diusulkan untuk Anda sunting.',
+  tablePlaceholder: 'mis. setiap kewajiban, tenggat, dan nilainya',
+  tableProposeAction: 'Usulkan kolom',
+  tableProposing: 'Menyusun kolom...',
+  tableColumnsTitle: 'Kolom',
+  tableColumnName: 'Nama',
+  tableColumnDescription: 'Isi kolom ini',
+  tableColumnAdd: 'Tambah kolom',
+  tableColumnRemove: 'Hapus',
+  tableRunAction: 'Jalankan ekstraksi tabel',
+  tableRunningTitle: 'Membaca seluruh bagian dokumen',
+  tableRunningHint: 'Proses ini lama. Anda boleh meninggalkan tab ini; ekstraksi tetap berjalan.',
+  tableProgress: (percent) => `${percent}% terbaca`,
+  tableRowCount: (n) => `${n} baris`,
+  tableCitationsLabel: 'Kutipan',
+  tableNothingFound: 'Tidak ada isi dokumen yang cocok dengan kolom ini.',
+  tableErrorTitle: 'Ekstraksi tabel gagal',
+  tableRetry: 'Jalankan lagi',
+  tableHistoryTitle: 'Ekstraksi tabel sebelumnya',
+  tableNewAction: 'Tabel baru',
+  tableStatusQueued: 'Antre',
+  tableStatusRunning: 'Berjalan',
+  tableStatusDone: 'Selesai',
+  tableStatusError: 'Gagal',
 };
 
 const dictionaries = { en, id } as const;

@@ -209,6 +209,20 @@ dialog::backdrop {
   color: var(--text-muted);
 }
 
+.field {
+  padding: 6px 10px;
+  border: var(--stroke-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--text-title);
+  font: inherit;
+  font-size: var(--fs-ui-xs);
+}
+.field:focus {
+  outline: none;
+  border-color: var(--border-brand-soft);
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
