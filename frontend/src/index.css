@@ -17,6 +17,9 @@ body {
   font-family: var(--font-core);
   background: var(--surface-page);
   color: var(--text-body);
+  /* Numbers (progress %, elapsed time, counts) get a fixed digit width so they don't
+     shift the surrounding layout on every poll tick. */
+  font-variant-numeric: tabular-nums;
 }
 
 button {
@@ -32,5 +35,46 @@ img {
    reach ::backdrop, so this is the one global rule that isn't a design-system token. */
 dialog::backdrop {
   background: rgba(0, 0, 0, 0.6);
+}
+
+/* Document-name link in the documents table (DocumentsScreen.tsx): quiet by default so a
+   dense list of names doesn't read as a wall of red underlines, but still affords itself as
+   clickable on hover/focus. Inline styles can't express :hover, hence the one class. */
+.doc-link {
+  color: var(--text-title);
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--ease-standard);
+}
+.doc-link:hover,
+.doc-link:focus-visible {
+  color: var(--text-link);
+  text-decoration: underline;
+}
+
+/* Drag-over affordance for the upload dropzone (DocumentsScreen.tsx). */
+.upload-dropzone {
+  border: var(--stroke-hairline) dashed var(--border-subtle);
+  transition: border-color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
+}
+.upload-dropzone[data-active='true'] {
+  border-color: var(--brand-primary);
+  background: var(--surface-brand-tint);
+}
+
+/* Skeleton row shown while the documents list is loading (DocumentsScreen.tsx). */
+.skeleton-block {
+  background: var(--surface-raised);
+  border-radius: var(--radius-sm);
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-block {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
 }
 

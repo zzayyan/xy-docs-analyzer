@@ -44,6 +44,12 @@ export interface Dict {
   relativeJustNow: string;
 
   errorGeneric: string;
+  errorDetailsShow: string;
+  errorDetailsHide: string;
+
+  docsCount: (n: number) => string;
+  docsFailedSummary: (n: number) => string;
+  uploadDropHint: string;
 
   docBackToList: string;
   docElapsedLabel: string;
@@ -129,6 +135,12 @@ const en: Dict = {
   relativeJustNow: 'just now',
 
   errorGeneric: 'Something went wrong. Please try again.',
+  errorDetailsShow: 'Show details',
+  errorDetailsHide: 'Hide details',
+
+  docsCount: (n) => (n === 1 ? '1 document' : `${n} documents`),
+  docsFailedSummary: (n) => (n === 1 ? '1 document failed to process.' : `${n} documents failed to process.`),
+  uploadDropHint: 'Drag a file here, or',
 
   docBackToList: '← Back to documents',
   docElapsedLabel: 'Elapsed',
@@ -214,6 +226,12 @@ const id: Dict = {
   relativeJustNow: 'baru saja',
 
   errorGeneric: 'Terjadi kesalahan. Silakan coba lagi.',
+  errorDetailsShow: 'Tampilkan detail',
+  errorDetailsHide: 'Sembunyikan detail',
+
+  docsCount: (n) => (n === 1 ? '1 dokumen' : `${n} dokumen`),
+  docsFailedSummary: (n) => (n === 1 ? '1 dokumen gagal diproses.' : `${n} dokumen gagal diproses.`),
+  uploadDropHint: 'Seret berkas ke sini, atau',
 
   docBackToList: '← Kembali ke daftar dokumen',
   docElapsedLabel: 'Berlalu',

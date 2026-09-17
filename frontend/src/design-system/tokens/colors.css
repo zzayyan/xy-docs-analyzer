@@ -72,6 +72,19 @@
 --status-secure:var(--xy-teal-500);
 
 --focus-ring:var(--xy-red-400);
+
+/* ---- Soft tone pairs (Alert/Toast backgrounds) — split out so [data-theme="dark"] can
+   remap them without every consumer hardcoding a light-only hex ---- */
+--surface-info-soft:var(--xy-blue-100);
+--text-info-soft:var(--xy-navy-700);
+--surface-success-soft:#F1F8E8;
+--text-success-soft:var(--xy-ink-800);
+--surface-warning-soft:#FFF1EB;
+--text-warning-soft:var(--xy-red-900);
+--surface-danger-soft:var(--xy-red-50);
+--text-danger-soft:var(--xy-red-800);
+--surface-secure-soft:#E8FAF9;
+--text-secure-soft:var(--xy-ink-800);
 }
 
 /* Product-UI dark theme. The XYLM console in the source deck is a near-black
@@ -97,4 +110,15 @@
 --border-subtle:#2E2C36;
 --border-strong:#3C3A46;
 --border-brand-soft:#5A2026;
+
+--surface-info-soft:var(--surface-subtle);
+--text-info-soft:var(--xy-blue-300);
+--surface-success-soft:var(--surface-subtle);
+--text-success-soft:var(--xy-green-500);
+--surface-warning-soft:var(--surface-subtle);
+--text-warning-soft:var(--xy-red-200);
+--surface-danger-soft:var(--surface-brand-tint);
+--text-danger-soft:var(--xy-red-200);
+--surface-secure-soft:var(--surface-subtle);
+--text-secure-soft:var(--status-secure);
 }

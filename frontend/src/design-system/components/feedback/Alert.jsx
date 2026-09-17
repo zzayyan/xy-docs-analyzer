@@ -2,11 +2,11 @@ import React from 'react';
 
 export function Alert({tone='info',title,children,iconSrc,onDismiss,style}){
   const tones={
-    info:{bg:'var(--xy-blue-100)',bd:'var(--xy-blue-400)',fg:'var(--xy-navy-700)'},
-    success:{bg:'#F1F8E8',bd:'var(--status-success)',fg:'var(--xy-ink-800)'},
-    warning:{bg:'#FFF1EB',bd:'var(--brand-accent)',fg:'var(--xy-red-900)'},
-    danger:{bg:'var(--xy-red-50)',bd:'var(--brand-primary)',fg:'var(--xy-red-800)'},
-    secure:{bg:'#E8FAF9',bd:'var(--status-secure)',fg:'var(--xy-ink-800)'}
+    info:{bg:'var(--surface-info-soft)',bd:'var(--xy-blue-400)',fg:'var(--text-info-soft)'},
+    success:{bg:'var(--surface-success-soft)',bd:'var(--status-success)',fg:'var(--text-success-soft)'},
+    warning:{bg:'var(--surface-warning-soft)',bd:'var(--brand-accent)',fg:'var(--text-warning-soft)'},
+    danger:{bg:'var(--surface-danger-soft)',bd:'var(--brand-primary)',fg:'var(--text-danger-soft)'},
+    secure:{bg:'var(--surface-secure-soft)',bd:'var(--status-secure)',fg:'var(--text-secure-soft)'}
   }[tone];
   return (
     <div role="status" style={{display:'flex',gap:'var(--space-3)',alignItems:'flex-start',padding:'var(--space-4)',
