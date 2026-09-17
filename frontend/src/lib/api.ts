@@ -37,6 +37,7 @@ export interface Document {
   step_done: number | null;
   step_total: number | null;
   llm_model: string | null;
+  has_original: boolean;
 }
 
 export interface Citation {
@@ -129,6 +130,8 @@ export const api = {
     form.append('file', file);
     return request('/documents', { method: 'POST', body: form });
   },
+
+  originalUrl: (id: string) => `${API_URL}/documents/${id}/original`,
 
   deleteDocument: (id: string) => request<void>(`/documents/${id}`, { method: 'DELETE' }),
 

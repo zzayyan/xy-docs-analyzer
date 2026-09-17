@@ -35,6 +35,7 @@ export interface Dict {
   modeLong: string;
 
   deleteAction: string;
+  originalLink: string;
   deleteConfirmTitle: string;
   deleteConfirmBody: (name: string) => string;
   deleteConfirmConfirm: string;
@@ -122,6 +123,7 @@ const en: Dict = {
   modeLong: 'Long',
 
   deleteAction: 'Delete',
+  originalLink: 'Original',
   deleteConfirmTitle: 'Delete this document?',
   deleteConfirmBody: (name) =>
     `"${name}" and everything derived from it (chunks, outline, chat history) will be permanently removed.`,
@@ -210,6 +212,7 @@ const id: Dict = {
   modeLong: 'Panjang',
 
   deleteAction: 'Hapus',
+  originalLink: 'Asli',
   deleteConfirmTitle: 'Hapus dokumen ini?',
   deleteConfirmBody: (name) =>
     `"${name}" beserta semua turunannya (chunk, daftar isi, riwayat chat) akan dihapus permanen.`,

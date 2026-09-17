@@ -82,6 +82,12 @@ export function DocumentScreen({ docId }: { docId: string }) {
           </div>
         )}
 
+        {doc?.has_original && (
+          <a href={api.originalUrl(doc.id)} target="_blank" rel="noreferrer" className="quiet-button" style={{ textDecoration: 'none' }}>
+            {t.originalLink}
+          </a>
+        )}
+
         {doc && (
           <button className="quiet-button" data-tone="danger" onClick={() => setConfirmDelete(true)}>
             {t.deleteAction}

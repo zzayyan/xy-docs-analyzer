@@ -69,9 +69,12 @@ npx tsc -b && npm run lint && npm run build
 
 ## Limits worth knowing
 
-- **No PDF viewer, no re-ingest.** The uploaded file is deleted once ingest finishes;
-  only the extracted text survives. A document that fails partway through has to be
-  re-uploaded from your own copy, not retried in place.
+- **Originals are kept until their Document is deleted.** Each Document's Original is
+  stored exactly as received under `DATA_DIR` (default `backend/data/originals/`) and
+  opens from the Document header's "Original" link; deleting the Document deletes its
+  Original. Documents ingested
+  before this change have no Original. There's still no re-ingest: a document that fails
+  partway through has to be re-uploaded.
 - **No auth.** Every document is readable and deletable by anyone who can reach the
   API. Fine on localhost; don't bind `--host 0.0.0.0` without adding auth first.
 - Ingest throughput is roughly 10-20 seconds per PDF page end to end (Docling

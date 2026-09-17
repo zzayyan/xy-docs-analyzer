@@ -5,6 +5,9 @@ __pycache__/
 node_modules/
 dist/
 
+# Kept Originals (backend DATA_DIR)
+backend/data/
+
 # Locally-installed agent skills (personal tooling, not shared via the repo)
 .agents/skills/
 .claude/skills/

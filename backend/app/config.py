@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -32,6 +33,10 @@ class Settings(BaseSettings):
     # Ingest costs roughly 10-19 s per PDF page end to end, so these caps bound the wait, not just disk use
     max_upload_mb: int = 100
     max_pages: int = 200
+
+    # Originals are kept here as originals/<document id><extension> until their Document is deleted.
+    # Defaults to backend/data regardless of the directory the server is started from.
+    data_dir: Path = Path(__file__).resolve().parents[1] / "data"
 
     # Section summaries and knowledge-graph extraction are one LLM call each; this is how many run at once
     llm_concurrency: int = 8

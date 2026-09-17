@@ -1,4 +1,6 @@
 import json
+import mimetypes
+import shutil
 import tempfile
 import uuid
 from collections.abc import AsyncIterator
@@ -6,7 +8,7 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app import store
@@ -70,6 +72,7 @@ class Document(BaseModel):
     step_done: int | None = None
     step_total: int | None = None
     llm_model: str | None = None
+    has_original: bool = False
 
 
 class Citation(BaseModel):
@@ -131,11 +134,10 @@ def chat_history(doc_id: str) -> list[dict]:
     return [{"question": t["question"], "answer": t["answer"]} for t in store.list_turns(doc_id) if t["complete"]]
 
 
-def ingest_and_cleanup(doc_id: str, path: str) -> None:
-    try:
-        ingest(doc_id, path)
-    finally:
-        Path(path).unlink(missing_ok=True)
+def original_path(doc_id: str) -> Path | None:
+    """A Document's Original on disk, or None for Documents ingested before Originals were kept."""
+    # "{id}*", not "{id}.*": an Original uploaded without an extension is stored as the bare id
+    return next((settings.data_dir / "originals").glob(f"{doc_id}*"), None)
 
 
 def save_upload(file: UploadFile) -> str:
@@ -167,7 +169,12 @@ def upload_document(file: UploadFile, background: BackgroundTasks) -> dict:
         raise HTTPException(status_code=413, detail=f"PDF has {pages} pages, over the {settings.max_pages} page limit")
 
     doc_id = create_file(file.filename or Path(path).name)
-    background.add_task(ingest_and_cleanup, doc_id, path)
+    originals = settings.data_dir / "originals"
+    originals.mkdir(parents=True, exist_ok=True)
+    # Keeps the extension: Docling picks the format from it, and the served content type is guessed from it
+    original = originals / f"{doc_id}{Path(path).suffix.lower()}"
+    shutil.move(path, original)
+    background.add_task(ingest, doc_id, str(original))
     return {"doc_id": doc_id}
 
 
@@ -188,7 +195,20 @@ def list_documents() -> list[dict]:
 
 @app.get("/documents/{doc_id}", response_model=Document)
 def document_status(doc_id: str) -> dict:
-    return get_file(doc_id)
+    return {**get_file(doc_id), "has_original": original_path(doc_id) is not None}
+
+
+@app.get("/documents/{doc_id}/original")
+def document_original(doc_id: str) -> FileResponse:
+    file = get_file(doc_id)
+    path = original_path(doc_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="original not kept for this document")
+    media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    # Only PDFs open inline. Anything else (an HTML Original especially) downloads instead, so an
+    # uploaded page can never run script on the API's origin.
+    disposition = "inline" if media_type == "application/pdf" else "attachment"
+    return FileResponse(path, media_type=media_type, filename=file["name"], content_disposition_type=disposition)
 
 
 @app.delete("/documents/{doc_id}", status_code=204)
@@ -196,6 +216,10 @@ def delete_document(doc_id: str) -> None:
     get_file(doc_id)  # 404 if missing
     # Safe even if an ingest is still writing: every write in app/ingest/* is anchored on MATCH (f:File
     # {id}) or on the chunks/sections it already created, so a delete here leaves nothing orphaned.
+    # Original first: on Windows unlink fails while ingest still has it open, and failing before the
+    # graph delete leaves a Document the user can retry deleting instead of an orphaned file.
+    if path := original_path(doc_id):
+        path.unlink(missing_ok=True)
     store.delete_file(doc_id)
 
 
