@@ -1,4 +1,4 @@
-import Markdown, { type Components } from 'react-markdown';
+import Markdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import type { Citation } from '../lib/api';
 
 interface MessageBodyProps {
@@ -34,10 +34,10 @@ export function MessageBody({ text, citations, onCitationClick }: MessageBodyPro
   const withCitationLinks = text.replace(/\[(\d+)\]/g, (_match, n) => `[${n}](${CITE_PREFIX}${n})`);
 
   const components: Components = {
-    p: ({ children }) => <p style={{ margin: 0, lineHeight: 'var(--lh-body)' }}>{children}</p>,
+    p: ({ children }) => <p style={{ margin: 0 }}>{children}</p>,
     ul: ({ children }) => <ul style={listStyle}>{children}</ul>,
     ol: ({ children }) => <ol style={listStyle}>{children}</ol>,
-    li: ({ children }) => <li style={{ lineHeight: 'var(--lh-body)' }}>{children}</li>,
+    li: ({ children }) => <li>{children}</li>,
     strong: ({ children }) => <strong style={{ fontWeight: 'var(--fw-semibold)' }}>{children}</strong>,
     h1: ({ children }) => <h3 style={headingStyle}>{children}</h3>,
     h2: ({ children }) => <h3 style={headingStyle}>{children}</h3>,
@@ -79,15 +79,20 @@ export function MessageBody({ text, citations, onCitationClick }: MessageBodyPro
           <button
             onClick={() => onCitationClick(citation)}
             style={{
-              display: 'inline',
-              background: 'var(--surface-brand-tint)',
-              color: 'var(--brand-primary)',
-              border: 'none',
-              borderRadius: 'var(--radius-sm)',
+              display: 'inline-block',
+              minWidth: 16,
               padding: '0 4px',
               margin: '0 1px',
-              font: 'inherit',
+              position: 'relative',
+              top: -1,
+              border: 'none',
+              borderRadius: 4,
+              background: 'var(--surface-brand-tint)',
+              color: 'var(--brand-primary)',
+              fontSize: 10.5,
+              lineHeight: '16px',
               fontWeight: 'var(--fw-semibold)',
+              textAlign: 'center',
               cursor: 'pointer',
             }}
           >
@@ -104,8 +109,12 @@ export function MessageBody({ text, citations, onCitationClick }: MessageBodyPro
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', maxWidth: 'var(--measure)' }}>
-      <Markdown components={components}>{withCitationLinks}</Markdown>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, color: 'var(--text-title)', lineHeight: 1.65 }}>
+      {/* defaultUrlTransform blanks any non-http(s)/mailto scheme, which silently turned every
+          cite:n href into "" and every marker into a plain link. Let only cite: through. */}
+      <Markdown components={components} urlTransform={(url) => (url.startsWith(CITE_PREFIX) ? url : defaultUrlTransform(url))}>
+        {withCitationLinks}
+      </Markdown>
     </div>
   );
 }

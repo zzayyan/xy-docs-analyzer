@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Badge, Button, Tabs } from '../design-system';
+import { Alert, Badge } from '../design-system';
 import { ChatPanel } from '../components/ChatPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorDetail } from '../components/ErrorDetail';
@@ -11,11 +11,14 @@ import { api, ApiError, isInFlight } from '../lib/api';
 import { formatRelative } from '../lib/format';
 import { STATUS_TONE, statusLabel } from '../lib/status';
 import { useLang } from '../lib/i18n';
+import { navigate } from '../lib/useHashRoute';
+
+type Tab = 'chat' | 'outline';
 
 export function DocumentScreen({ docId }: { docId: string }) {
   const { t, lang } = useLang();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState<Tab>('chat');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -29,7 +32,8 @@ export function DocumentScreen({ docId }: { docId: string }) {
     mutationFn: () => api.deleteDocument(docId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['documents'] });
-      window.location.hash = '#/';
+      queryClient.removeQueries({ queryKey: ['document', docId] });
+      navigate('/');
     },
     onError: (error: unknown) => {
       setToast(error instanceof ApiError ? error.detail : t.errorGeneric);
@@ -40,75 +44,79 @@ export function DocumentScreen({ docId }: { docId: string }) {
   const doc = documentQuery.data;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)', maxWidth: 'var(--container-max)', margin: '0 auto', height: '100%' }}>
-      <div>
-        <a href="#/" style={{ fontSize: 'var(--fs-ui-sm)', color: 'var(--text-link)', textDecoration: 'none' }}>
-          {t.docBackToList}
+    <>
+      <header className="pane-header">
+        <a href="#/" className="quiet-button mobile-only" style={{ textDecoration: 'none' }}>
+          ← {t.railDocuments}
         </a>
-      </div>
 
-      {documentQuery.isError && (
-        <Alert tone="danger" title={t.errorGeneric}>
-          {documentQuery.error instanceof Error ? documentQuery.error.message : ''}
-        </Alert>
-      )}
-
-      {doc && (
-        <>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-              <h1 style={{ margin: 0, fontSize: 'var(--fs-ui-xl)', fontWeight: 'var(--fw-bold)', color: 'var(--text-title)' }}>
-                {doc.name}
-              </h1>
-              <Badge tone={STATUS_TONE[doc.status]}>{statusLabel(doc.status, t)}</Badge>
-            </div>
-            <div style={{ display: 'flex', gap: 'var(--space-3)', fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>
-              <span>{doc.mode === 'long' ? t.modeLong : doc.mode === 'short' ? t.modeShort : t.modeUnknown}</span>
-              {doc.created_at && <span>{formatRelative(doc.created_at, lang, t.relativeJustNow)}</span>}
+        {doc ? (
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+            <h1
+              className="truncate"
+              style={{ margin: 0, fontSize: 'var(--fs-ui-md)', fontWeight: 'var(--fw-semibold)', color: 'var(--text-title)' }}
+            >
+              {doc.name}
+            </h1>
+            {doc.status !== 'done' && <Badge tone={STATUS_TONE[doc.status]}>{statusLabel(doc.status, t)}</Badge>}
+            <span className="truncate" style={{ display: 'flex', gap: 10, fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>
+              {doc.mode && <span>{doc.mode === 'long' ? t.modeLong : t.modeShort}</span>}
               {doc.chunks !== null && <span>{t.outlineChunkCount(doc.chunks)}</span>}
-            </div>
+              {doc.created_at && <span>{formatRelative(doc.created_at, lang, t.relativeJustNow)}</span>}
+            </span>
           </div>
+        ) : (
+          <div style={{ flex: 1 }}>
+            {documentQuery.isPending && <div className="skeleton-block" style={{ height: 14, width: 220 }} />}
+          </div>
+        )}
 
-          {isInFlight(doc.status) && (
-            <div style={{ background: 'var(--surface-card)', border: 'var(--stroke-hairline) solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: 'var(--space-6)' }}>
-              <IngestProgress doc={doc} />
-            </div>
-          )}
+        {doc?.status === 'done' && doc.mode === 'long' && (
+          <div className="segmented" role="tablist">
+            {(['chat', 'outline'] as const).map((key) => (
+              <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
+                {key === 'chat' ? t.tabChat : t.tabOutline}
+              </button>
+            ))}
+          </div>
+        )}
 
-          {doc.status === 'error' && (
+        {doc && (
+          <button className="quiet-button" data-tone="danger" onClick={() => setConfirmDelete(true)}>
+            {t.deleteAction}
+          </button>
+        )}
+      </header>
+
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {documentQuery.isError && (
+          <div style={{ padding: 'var(--space-6)', maxWidth: 720 }}>
+            <Alert tone="danger" title={t.errorGeneric}>
+              {documentQuery.error instanceof Error ? documentQuery.error.message : ''}
+            </Alert>
+          </div>
+        )}
+
+        {doc && isInFlight(doc.status) && (
+          <div style={{ padding: '32px var(--space-6)', maxWidth: 720 }}>
+            <IngestProgress doc={doc} />
+          </div>
+        )}
+
+        {doc?.status === 'error' && (
+          <div style={{ padding: 'var(--space-6)', maxWidth: 720 }}>
             <Alert tone="danger" title={t.docErrorTitle}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
                 <span>{t.docErrorReupload}</span>
                 {doc.error && <ErrorDetail message={doc.error} limit={160} />}
-                <div>
-                  <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)} style={{ color: 'var(--text-danger-soft)' }}>
-                    {t.deleteAction}
-                  </Button>
-                </div>
               </div>
             </Alert>
-          )}
+          </div>
+        )}
 
-          {doc.status === 'done' && doc.mode === 'long' && (
-            <>
-              <Tabs tabs={[t.tabChat, t.tabOutline]} activeIndex={tab} onChange={setTab} />
-              {/* minHeight: 400 alone doesn't stop this box from growing past the viewport --
-                  minHeight: 0 + overflow: hidden is what lets it actually shrink to the space
-                  main has left, so ChatPanel's own internal scroll region (not the whole page)
-                  is what scrolls and the composer stays pinned at the bottom. */}
-              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-                {tab === 0 ? <ChatPanel docId={doc.id} /> : <OutlinePanel docId={doc.id} />}
-              </div>
-            </>
-          )}
-
-          {doc.status === 'done' && doc.mode !== 'long' && (
-            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-              <ChatPanel docId={doc.id} />
-            </div>
-          )}
-        </>
-      )}
+        {doc?.status === 'done' &&
+          (tab === 'outline' && doc.mode === 'long' ? <OutlinePanel docId={doc.id} /> : <ChatPanel docId={doc.id} />)}
+      </div>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -120,6 +128,6 @@ export function DocumentScreen({ docId }: { docId: string }) {
       />
 
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
-    </div>
+    </>
   );
 }

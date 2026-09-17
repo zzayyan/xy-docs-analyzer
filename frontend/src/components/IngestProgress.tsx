@@ -26,7 +26,7 @@ export function IngestProgress({ doc }: { doc: Document }) {
   const unitKey = STEP_UNIT[doc.status];
   const stepLabel =
     unitKey && doc.step_total
-      ? `${statusLabel(doc.status, t)} — ${t.docStepCount(doc.step_done ?? 0, doc.step_total)} ${t[unitKey]}`
+      ? `${statusLabel(doc.status, t)}: ${t.docStepCount(doc.step_done ?? 0, doc.step_total)} ${t[unitKey]}`
       : statusLabel(doc.status, t);
 
   return (

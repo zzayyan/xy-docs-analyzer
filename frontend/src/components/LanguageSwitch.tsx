@@ -26,8 +26,8 @@ export function LanguageSwitch() {
             aria-pressed={active}
             onClick={() => setLang(option)}
             style={{
-              padding: '6px 12px',
-              fontSize: 'var(--fs-ui-xs)',
+              padding: '3px 8px',
+              fontSize: 11,
               fontWeight: 'var(--fw-semibold)',
               letterSpacing: 'var(--ls-caps)',
               cursor: active ? 'default' : 'pointer',

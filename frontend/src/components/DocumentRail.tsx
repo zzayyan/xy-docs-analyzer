@@ -1,0 +1,140 @@
+import { useQuery } from '@tanstack/react-query';
+import { Logo } from '../design-system';
+import { LanguageSwitch } from './LanguageSwitch';
+import { UploadButton } from './UploadButton';
+import { api, isInFlight, type Document } from '../lib/api';
+import { formatRelative } from '../lib/format';
+import { statusLabel } from '../lib/status';
+import { useFileDrop } from '../lib/useFileDrop';
+import { useLang } from '../lib/i18n';
+
+interface DocumentRailProps {
+  activeId: string | null;
+  onUpload: (file: File) => void;
+  uploading: boolean;
+}
+
+export function DocumentRail({ activeId, onUpload, uploading }: DocumentRailProps) {
+  const { t } = useLang();
+  const drop = useFileDrop(onUpload);
+
+  const limitsQuery = useQuery({ queryKey: ['limits'], queryFn: api.limits });
+  const documentsQuery = useQuery({
+    queryKey: ['documents'],
+    queryFn: api.listDocuments,
+    refetchInterval: (query) => (query.state.data?.some((d) => isInFlight(d.status)) ? 3000 : false),
+  });
+  const documents = documentsQuery.data ?? [];
+
+  return (
+    <aside className="rail" data-drop={drop.active} {...drop.handlers}>
+      <div className="pane-header">
+        <Logo variant="mark" height={20} basePath="/design-system/assets/" />
+        <span style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-title)' }}>{t.appName}</span>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px 8px' }}>
+        <span style={{ fontSize: 'var(--fs-ui-xs)', fontWeight: 'var(--fw-semibold)', color: 'var(--text-card-title)' }}>
+          {t.railDocuments}
+          {documentsQuery.data && (
+            <span style={{ marginLeft: 6, fontWeight: 'var(--fw-regular)', color: 'var(--text-muted)' }}>{documents.length}</span>
+          )}
+        </span>
+        <UploadButton onFile={onUpload} uploading={uploading} variant="secondary" />
+      </div>
+
+      <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, paddingBottom: 12 }}>
+        {documentsQuery.isPending &&
+          [64, 48, 72, 56].map((w) => (
+            <div key={w} style={{ padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div className="skeleton-block" style={{ height: 12, width: `${w}%` }} />
+              <div className="skeleton-block" style={{ height: 10, width: '36%' }} />
+            </div>
+          ))}
+
+        {documentsQuery.isError && (
+          <p style={{ margin: 0, padding: '8px 20px', fontSize: 'var(--fs-ui-xs)', color: 'var(--status-danger)' }}>{t.errorGeneric}</p>
+        )}
+
+        {documentsQuery.isSuccess && documents.length === 0 && (
+          <p style={{ margin: 0, padding: '8px 20px', fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>{t.railEmpty}</p>
+        )}
+
+        {documents.map((doc) => (
+          <RailItem key={doc.id} doc={doc} active={doc.id === activeId} />
+        ))}
+      </nav>
+
+      <div
+        style={{
+          flex: '0 0 auto',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 'var(--space-3)',
+          padding: '10px 20px',
+          borderTop: 'var(--stroke-hairline) solid var(--border-subtle)',
+        }}
+      >
+        <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--text-muted)' }}>
+          {drop.active
+            ? t.dropActive
+            : limitsQuery.data
+              ? t.uploadLimitsShort(limitsQuery.data.max_upload_mb, limitsQuery.data.max_pages)
+              : limitsQuery.isError
+                ? t.uploadLimitsUnavailable
+                : ''}
+        </span>
+        <LanguageSwitch />
+      </div>
+    </aside>
+  );
+}
+
+function RailItem({ doc, active }: { doc: Document; active: boolean }) {
+  const { t, lang } = useLang();
+  const inFlight = isInFlight(doc.status);
+
+  let meta: React.ReactNode;
+  if (inFlight) {
+    meta = (
+      <span style={{ color: 'var(--brand-primary)' }}>
+        {statusLabel(doc.status, t)}
+        {doc.step_total ? ` ${doc.step_done ?? 0}/${doc.step_total}` : ''}
+      </span>
+    );
+  } else if (doc.status === 'error') {
+    meta = <span style={{ color: 'var(--status-danger)' }}>{t.statusError}</span>;
+  } else {
+    meta = (
+      <>
+        <span>{doc.mode === 'long' ? t.modeLong : t.modeShort}</span>
+        {doc.created_at && <span>{formatRelative(doc.created_at, lang, t.relativeJustNow)}</span>}
+      </>
+    );
+  }
+
+  return (
+    <a href={`#/doc/${doc.id}`} className="rail-item" aria-current={active ? 'page' : undefined} title={doc.name}>
+      <div
+        className="truncate"
+        style={{ fontWeight: active ? 'var(--fw-semibold)' : 'var(--fw-medium)', color: 'var(--text-title)', lineHeight: 1.35 }}
+      >
+        {doc.name}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 2, fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>{meta}</div>
+      {inFlight && (
+        <div style={{ height: 2, marginTop: 7, borderRadius: 2, background: 'var(--surface-raised)', overflow: 'hidden' }}>
+          <div
+            style={{
+              height: '100%',
+              width: `${Math.round(doc.progress * 100)}%`,
+              background: 'var(--brand-primary)',
+              transition: 'width var(--dur-slow) var(--ease-out)',
+            }}
+          />
+        </div>
+      )}
+    </a>
+  );
+}

@@ -1,27 +1,26 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 
 // Explicit shape (not inferred from `en` with `as const`) so `id`'s values can differ from
-// `en`'s while TypeScript still requires every key to be present — a missing Indonesian
+// `en`'s while TypeScript still requires every key to be present: a missing Indonesian
 // string is a build error, not a silent fallback to English.
 export interface Dict {
   appName: string;
-  navDocuments: string;
   langEnglish: string;
   langIndonesian: string;
 
-  uploadTitle: string;
+  railDocuments: string;
+  railEmpty: string;
+  dropActive: string;
+
+  emptyHeader: string;
+  emptyTitle: string;
+  emptyBody: string;
+
   uploadButton: string;
   uploadUploading: string;
   uploadLimitsCaption: (mb: number, pages: number) => string;
+  uploadLimitsShort: (mb: number, pages: number) => string;
   uploadLimitsUnavailable: string;
-
-  tableName: string;
-  tableStatus: string;
-  tableMode: string;
-  tableProgress: string;
-  tableUploaded: string;
-  tableActions: string;
-  tableEmpty: string;
 
   statusQueued: string;
   statusConverting: string;
@@ -33,7 +32,6 @@ export interface Dict {
 
   modeShort: string;
   modeLong: string;
-  modeUnknown: string;
 
   deleteAction: string;
   deleteConfirmTitle: string;
@@ -47,11 +45,6 @@ export interface Dict {
   errorDetailsShow: string;
   errorDetailsHide: string;
 
-  docsCount: (n: number) => string;
-  docsFailedSummary: (n: number) => string;
-  uploadDropHint: string;
-
-  docBackToList: string;
   docElapsedLabel: string;
   docEtaLabel: (eta: string) => string;
   docStepCount: (done: number, total: number) => string;
@@ -64,8 +57,10 @@ export interface Dict {
   chatPlaceholder: string;
   chatSend: string;
   chatSending: string;
+  chatEmptyTitle: string;
   chatEmpty: string;
-  chatTurnCount: (n: number) => string;
+  chatSuggestions: string[];
+  chatComposerHint: string;
   chatClear: string;
   chatClearConfirmTitle: string;
   chatClearConfirmBody: string;
@@ -75,6 +70,7 @@ export interface Dict {
   chatStatusKgRetrieve: string;
 
   citationTitle: (n: number) => string;
+  citationSource: string;
   citationPages: string;
   citationHeadings: string;
   citationSourceVector: string;
@@ -82,7 +78,6 @@ export interface Dict {
   citationSourceKg: string;
   citationSourceKgFacts: string;
   citationClose: string;
-  citationNone: string;
 
   tabChat: string;
   tabOutline: string;
@@ -95,41 +90,39 @@ export interface Dict {
 
 const en: Dict = {
   appName: 'Docs Analyzer',
-  navDocuments: 'Documents',
   langEnglish: 'EN',
   langIndonesian: 'ID',
 
-  uploadTitle: 'Upload a document',
+  railDocuments: 'Documents',
+  railEmpty: 'No documents yet. Upload one to start.',
+  dropActive: 'Drop to upload',
+
+  emptyHeader: 'New analysis',
+  emptyTitle: 'Analyze a document',
+  emptyBody:
+    'Drop a file here or choose one to upload. You can ask questions as soon as processing finishes, and long documents also get a browsable outline.',
+
   uploadButton: 'Upload',
   uploadUploading: 'Uploading…',
-  uploadLimitsCaption: (mb: number, pages: number) =>
-    `Limit ${mb} MB, and ${pages} pages for PDF. Other formats are not page-limited.`,
+  uploadLimitsCaption: (mb, pages) => `Up to ${mb} MB. PDFs up to ${pages} pages.`,
+  uploadLimitsShort: (mb, pages) => `${mb} MB, ${pages} PDF pages max`,
   uploadLimitsUnavailable: 'API not reachable',
-
-  tableName: 'Document',
-  tableStatus: 'Status',
-  tableMode: 'Mode',
-  tableProgress: 'Progress',
-  tableUploaded: 'Uploaded',
-  tableActions: 'Actions',
-  tableEmpty: 'No documents yet. Upload one to get started.',
 
   statusQueued: 'Queued',
   statusConverting: 'Converting',
   statusEmbedding: 'Embedding',
   statusBuildingTree: 'Building outline',
   statusExtractingGraph: 'Extracting graph',
-  statusDone: 'Done',
-  statusError: 'Error',
+  statusDone: 'Ready',
+  statusError: 'Failed',
 
   modeShort: 'Short',
   modeLong: 'Long',
-  modeUnknown: '—',
 
   deleteAction: 'Delete',
   deleteConfirmTitle: 'Delete this document?',
-  deleteConfirmBody: (name: string) =>
-    `"${name}" and everything derived from it — chunks, outline, chat history — will be permanently removed. This cannot be undone.`,
+  deleteConfirmBody: (name) =>
+    `"${name}" and everything derived from it (chunks, outline, chat history) will be permanently removed.`,
   deleteConfirmConfirm: 'Delete',
   deleteConfirmCancel: 'Cancel',
 
@@ -139,34 +132,32 @@ const en: Dict = {
   errorDetailsShow: 'Show details',
   errorDetailsHide: 'Hide details',
 
-  docsCount: (n) => (n === 1 ? '1 document' : `${n} documents`),
-  docsFailedSummary: (n) => (n === 1 ? '1 document failed to process.' : `${n} documents failed to process.`),
-  uploadDropHint: 'Drag a file here, or',
-
-  docBackToList: '← Back to documents',
   docElapsedLabel: 'Elapsed',
-  docEtaLabel: (eta) => `~${eta} remaining`,
+  docEtaLabel: (eta) => `About ${eta} remaining`,
   docStepCount: (done, total) => `${done} / ${total}`,
   unitPages: 'pages',
   unitChunks: 'chunks',
   unitSections: 'sections',
-  docErrorTitle: 'Ingest failed',
+  docErrorTitle: 'Processing failed',
   docErrorReupload: 'This document could not be processed. Delete it and upload the original file again.',
 
-  chatPlaceholder: 'Ask about this document…',
+  chatPlaceholder: 'Ask about this document',
   chatSend: 'Send',
   chatSending: 'Thinking…',
-  chatEmpty: 'No questions yet. Ask something about this document.',
-  chatTurnCount: (n) => (n === 1 ? '1 question asked' : `${n} questions asked`),
+  chatEmptyTitle: 'Ask anything about this document',
+  chatEmpty: 'Answers cite the passages they come from.',
+  chatSuggestions: ['Summarize this document', 'What are the key findings?', 'List the main sections and what each covers'],
+  chatComposerHint: 'Enter to send, Shift + Enter for a new line',
   chatClear: 'Clear chat',
   chatClearConfirmTitle: 'Clear chat history?',
   chatClearConfirmBody: 'All questions and answers for this document will be permanently removed.',
-  chatInterrupted: 'Interrupted',
+  chatInterrupted: 'Interrupted before finishing',
   chatStatusVectorRetrieve: 'Searching the document…',
   chatStatusTreeSearch: 'Reading the outline…',
   chatStatusKgRetrieve: 'Reading the knowledge graph…',
 
-  citationTitle: (n) => `Source [${n}]`,
+  citationTitle: (n) => `Source ${n}`,
+  citationSource: 'Found by',
   citationPages: 'Pages',
   citationHeadings: 'Section',
   citationSourceVector: 'Vector search',
@@ -174,54 +165,51 @@ const en: Dict = {
   citationSourceKg: 'Knowledge graph evidence',
   citationSourceKgFacts: 'Knowledge graph facts',
   citationClose: 'Close',
-  citationNone: '—',
 
   tabChat: 'Chat',
   tabOutline: 'Outline',
   outlineEmpty: 'No outline available for this document.',
-  outlineSelectSection: 'Select a section to view its content.',
-  outlinePageRange: (start, end) => (start === end ? `p. ${start}` : `p. ${start}–${end}`),
+  outlineSelectSection: 'Select a section to read it.',
+  outlinePageRange: (start, end) => (start === end ? `p. ${start}` : `p. ${start}-${end}`),
   outlineChunkCount: (n) => `${n} chunk${n === 1 ? '' : 's'}`,
-  outlineChunksEmpty: 'This section has no text of its own — see its subsections.',
+  outlineChunksEmpty: 'This section has no text of its own. Its subsections hold the content.',
 };
 
 const id: Dict = {
   appName: 'Docs Analyzer',
-  navDocuments: 'Dokumen',
   langEnglish: 'EN',
   langIndonesian: 'ID',
 
-  uploadTitle: 'Unggah dokumen',
+  railDocuments: 'Dokumen',
+  railEmpty: 'Belum ada dokumen. Unggah satu untuk mulai.',
+  dropActive: 'Lepas untuk mengunggah',
+
+  emptyHeader: 'Analisis baru',
+  emptyTitle: 'Analisis dokumen',
+  emptyBody:
+    'Seret berkas ke sini atau pilih berkas untuk diunggah. Anda bisa bertanya begitu proses selesai, dan dokumen panjang juga mendapat daftar isi yang bisa dijelajahi.',
+
   uploadButton: 'Unggah',
   uploadUploading: 'Mengunggah…',
-  uploadLimitsCaption: (mb: number, pages: number) =>
-    `Batas ${mb} MB, dan ${pages} halaman untuk PDF. Format lain tidak dibatasi jumlah halaman.`,
+  uploadLimitsCaption: (mb, pages) => `Maksimal ${mb} MB. PDF maksimal ${pages} halaman.`,
+  uploadLimitsShort: (mb, pages) => `Maks. ${mb} MB, ${pages} halaman PDF`,
   uploadLimitsUnavailable: 'API tidak dapat dijangkau',
-
-  tableName: 'Dokumen',
-  tableStatus: 'Status',
-  tableMode: 'Mode',
-  tableProgress: 'Progres',
-  tableUploaded: 'Diunggah',
-  tableActions: 'Aksi',
-  tableEmpty: 'Belum ada dokumen. Unggah satu untuk memulai.',
 
   statusQueued: 'Menunggu',
   statusConverting: 'Mengonversi',
   statusEmbedding: 'Membuat embedding',
-  statusBuildingTree: 'Membangun outline',
+  statusBuildingTree: 'Membangun daftar isi',
   statusExtractingGraph: 'Mengekstrak graf',
-  statusDone: 'Selesai',
+  statusDone: 'Siap',
   statusError: 'Gagal',
 
   modeShort: 'Pendek',
   modeLong: 'Panjang',
-  modeUnknown: '—',
 
   deleteAction: 'Hapus',
   deleteConfirmTitle: 'Hapus dokumen ini?',
-  deleteConfirmBody: (name: string) =>
-    `"${name}" beserta semua turunannya — chunk, outline, riwayat chat — akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.`,
+  deleteConfirmBody: (name) =>
+    `"${name}" beserta semua turunannya (chunk, daftar isi, riwayat chat) akan dihapus permanen.`,
   deleteConfirmConfirm: 'Hapus',
   deleteConfirmCancel: 'Batal',
 
@@ -231,13 +219,8 @@ const id: Dict = {
   errorDetailsShow: 'Tampilkan detail',
   errorDetailsHide: 'Sembunyikan detail',
 
-  docsCount: (n) => (n === 1 ? '1 dokumen' : `${n} dokumen`),
-  docsFailedSummary: (n) => (n === 1 ? '1 dokumen gagal diproses.' : `${n} dokumen gagal diproses.`),
-  uploadDropHint: 'Seret berkas ke sini, atau',
-
-  docBackToList: '← Kembali ke daftar dokumen',
   docElapsedLabel: 'Berlalu',
-  docEtaLabel: (eta) => `~${eta} lagi`,
+  docEtaLabel: (eta) => `Sekitar ${eta} lagi`,
   docStepCount: (done, total) => `${done} / ${total}`,
   unitPages: 'halaman',
   unitChunks: 'chunk',
@@ -245,36 +228,38 @@ const id: Dict = {
   docErrorTitle: 'Proses gagal',
   docErrorReupload: 'Dokumen ini gagal diproses. Hapus dan unggah ulang berkas aslinya.',
 
-  chatPlaceholder: 'Tanya tentang dokumen ini…',
+  chatPlaceholder: 'Tanya tentang dokumen ini',
   chatSend: 'Kirim',
   chatSending: 'Memikirkan…',
-  chatEmpty: 'Belum ada pertanyaan. Tanyakan sesuatu tentang dokumen ini.',
-  chatTurnCount: (n) => (n === 1 ? '1 pertanyaan diajukan' : `${n} pertanyaan diajukan`),
+  chatEmptyTitle: 'Tanyakan apa saja tentang dokumen ini',
+  chatEmpty: 'Setiap jawaban menyertakan kutipan sumbernya.',
+  chatSuggestions: ['Ringkas dokumen ini', 'Apa temuan utamanya?', 'Sebutkan bagian utama dan isi masing-masing'],
+  chatComposerHint: 'Enter untuk kirim, Shift + Enter untuk baris baru',
   chatClear: 'Hapus riwayat',
   chatClearConfirmTitle: 'Hapus riwayat chat?',
   chatClearConfirmBody: 'Semua pertanyaan dan jawaban untuk dokumen ini akan dihapus permanen.',
-  chatInterrupted: 'Terputus',
+  chatInterrupted: 'Terputus sebelum selesai',
   chatStatusVectorRetrieve: 'Mencari di dokumen…',
-  chatStatusTreeSearch: 'Membaca outline…',
+  chatStatusTreeSearch: 'Membaca daftar isi…',
   chatStatusKgRetrieve: 'Membaca graf pengetahuan…',
 
-  citationTitle: (n) => `Sumber [${n}]`,
+  citationTitle: (n) => `Sumber ${n}`,
+  citationSource: 'Ditemukan lewat',
   citationPages: 'Halaman',
   citationHeadings: 'Bagian',
   citationSourceVector: 'Pencarian vektor',
-  citationSourceTree: 'Outline dokumen',
+  citationSourceTree: 'Daftar isi dokumen',
   citationSourceKg: 'Bukti graf pengetahuan',
   citationSourceKgFacts: 'Fakta graf pengetahuan',
   citationClose: 'Tutup',
-  citationNone: '—',
 
   tabChat: 'Chat',
   tabOutline: 'Daftar Isi',
-  outlineEmpty: 'Tidak ada outline untuk dokumen ini.',
-  outlineSelectSection: 'Pilih bagian untuk melihat isinya.',
-  outlinePageRange: (start, end) => (start === end ? `hal. ${start}` : `hal. ${start}–${end}`),
+  outlineEmpty: 'Tidak ada daftar isi untuk dokumen ini.',
+  outlineSelectSection: 'Pilih bagian untuk membacanya.',
+  outlinePageRange: (start, end) => (start === end ? `hal. ${start}` : `hal. ${start}-${end}`),
   outlineChunkCount: (n) => `${n} chunk`,
-  outlineChunksEmpty: 'Bagian ini tidak punya teks sendiri — lihat sub-bagiannya.',
+  outlineChunksEmpty: 'Bagian ini tidak punya teks sendiri. Isinya ada di sub-bagian.',
 };
 
 const dictionaries = { en, id } as const;
@@ -287,7 +272,7 @@ function initialLang(): Lang {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === 'en' || stored === 'id') return stored;
   } catch {
-    // localStorage unavailable (private mode, etc.) — fall through to default
+    // localStorage unavailable (private mode, etc.): fall through to default
   }
   return 'en';
 }

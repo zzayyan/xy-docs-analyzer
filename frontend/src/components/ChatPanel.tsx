@@ -1,33 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Badge, Button, Pill, Textarea } from '../design-system';
+import { Button } from '../design-system';
 import { ConfirmDialog } from './ConfirmDialog';
-import { Drawer } from './Drawer';
 import { MessageBody } from './MessageBody';
+import { SourcePanel } from './SourcePanel';
 import { Toast } from './Toast';
 import { api, ApiError, type Citation, type Turn } from '../lib/api';
-import { useChatStream } from '../lib/useChatStream';
+import { useChatStream, type StreamState } from '../lib/useChatStream';
 import { useLang } from '../lib/i18n';
-
-const SOURCE_LABEL_KEY = {
-  vector: 'citationSourceVector',
-  tree: 'citationSourceTree',
-  kg: 'citationSourceKg',
-  kg_facts: 'citationSourceKgFacts',
-} as const;
-
-/** Short human hint for a citation pill -- "[1]" alone told you nothing about what it pointed
- * to. Prefer the deepest heading (what section), fall back to a page range, else nothing. */
-function citationShortLabel(c: Citation): string {
-  if (c.headings.length > 0) {
-    const heading = c.headings[c.headings.length - 1];
-    return heading.length > 28 ? `${heading.slice(0, 28)}…` : heading;
-  }
-  if (c.pages.length > 0) {
-    return c.pages.length === 1 ? `p. ${c.pages[0]}` : `p. ${c.pages[0]}–${c.pages[c.pages.length - 1]}`;
-  }
-  return '';
-}
 
 const STATUS_NODE_KEY = {
   vector_retrieve: 'chatStatusVectorRetrieve',
@@ -35,24 +15,40 @@ const STATUS_NODE_KEY = {
   kg_retrieve: 'chatStatusKgRetrieve',
 } as const;
 
+interface Selected {
+  key: string;
+  citation: Citation;
+}
+
+/** Short hint for a source chip: the deepest heading, else a page range. */
+function citationShortLabel(c: Citation): string {
+  if (c.headings.length > 0) return c.headings[c.headings.length - 1];
+  if (c.pages.length > 0) return c.pages.length === 1 ? `p. ${c.pages[0]}` : `p. ${c.pages[0]}-${c.pages[c.pages.length - 1]}`;
+  return '';
+}
+
 export function ChatPanel({ docId }: { docId: string }) {
   const { t } = useLang();
   const queryClient = useQueryClient();
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState('');
-  const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Selected | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const turnsQuery = useQuery({ queryKey: ['turns', docId], queryFn: () => api.listTurns(docId) });
-  // The backend persists a Turn in every case -- success, application failure, or a disconnect
-  // mid-stream (complete: false) -- so both callbacks refetch history the same way; only a
-  // failure additionally surfaces a toast.
-  const refetchTurns = () => queryClient.invalidateQueries({ queryKey: ['turns', docId] });
+  // The backend persists a Turn on success, failure and mid-stream disconnect alike, so every
+  // terminal path refetches history, then drops the optimistic question once the real one is in.
+  const settle = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['turns', docId] });
+    setPendingQuestion(null);
+  };
   const stream = useChatStream(docId, {
-    onDone: refetchTurns,
+    onDone: settle,
     onError: (message) => {
       setToast(message);
-      refetchTurns();
+      settle();
     },
   });
 
@@ -60,6 +56,7 @@ export function ChatPanel({ docId }: { docId: string }) {
     mutationFn: () => api.clearTurns(docId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['turns', docId] });
+      setSelected(null);
       setConfirmClear(false);
     },
     onError: (error: unknown) => {
@@ -68,48 +65,77 @@ export function ChatPanel({ docId }: { docId: string }) {
     },
   });
 
-  const send = () => {
-    const question = draft.trim();
-    if (!question || stream.state.status === 'streaming') return;
-    setDraft('');
-    stream.send(question);
-  };
-
   const turns = turnsQuery.data ?? [];
   const streaming = stream.state.status === 'streaming';
 
+  const send = (text: string) => {
+    const question = text.trim();
+    if (!question || streaming) return;
+    setDraft('');
+    setPendingQuestion(question);
+    stream.send(question);
+  };
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns.length, pendingQuestion, stream.state.answer]);
+
+  const select = (key: string, citation: Citation) =>
+    setSelected((current) => (current?.key === key ? null : { key, citation }));
+
+  const showEmpty = turnsQuery.isSuccess && turns.length === 0 && pendingQuestion === null;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', height: '100%' }}>
-      {turns.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
-          <span style={{ fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>
-            {t.chatTurnCount(turns.length)}
-          </span>
-          <Button variant="ghost" size="sm" onClick={() => setConfirmClear(true)} style={{ color: 'var(--text-muted)' }}>
-            {t.chatClear}
-          </Button>
-        </div>
-      )}
+    <div className="chat-layout" data-sources={selected !== null}>
+      <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}>
+        <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <div className="chat-column" style={{ display: 'flex', flexDirection: 'column', gap: 28, padding: '24px 24px 16px' }}>
+            {showEmpty && <EmptyChat onPick={send} />}
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-        {turns.length === 0 && !turnsQuery.isPending && !streaming ? (
-          <p style={{ margin: 'var(--space-8) 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--fs-ui-sm)' }}>
-            {t.chatEmpty}
-          </p>
-        ) : (
-          turns.map((turn) => <TurnBubbles key={turn.id} turn={turn} onCitationClick={setSelectedCitation} />)
-        )}
-        {streaming && <LiveBubble state={stream.state} onCitationClick={setSelectedCitation} />}
+            {turns.map((turn) => (
+              <TurnView key={turn.id} turn={turn} selectedKey={selected?.key ?? null} onSelect={select} />
+            ))}
+
+            {pendingQuestion !== null && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <Question text={pendingQuestion} />
+                <LiveAnswer state={stream.state} selectedKey={selected?.key ?? null} onSelect={select} />
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="chat-column" style={{ flex: '0 0 auto', padding: '8px 24px 14px' }}>
+          <div className="composer">
+            <textarea
+              rows={1}
+              value={draft}
+              placeholder={t.chatPlaceholder}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  send(draft);
+                }
+              }}
+            />
+            <Button size="sm" onClick={() => send(draft)} disabled={streaming || !draft.trim()}>
+              {t.chatSend}
+            </Button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 26, marginTop: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t.chatComposerHint}</span>
+            {turns.length > 0 && (
+              <button className="quiet-button" onClick={() => setConfirmClear(true)} disabled={streaming}>
+                {t.chatClear}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
-      <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-        <Textarea placeholder={t.chatPlaceholder} value={draft} onChange={(e) => setDraft(e.target.value)} rows={2} disabled={streaming} />
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Button onClick={send} disabled={streaming || !draft.trim()}>
-            {streaming ? t.chatSending : t.chatSend}
-          </Button>
-        </div>
-      </div>
+      {selected && <SourcePanel citation={selected.citation} onClose={() => setSelected(null)} />}
 
       <ConfirmDialog
         open={confirmClear}
@@ -120,120 +146,109 @@ export function ChatPanel({ docId }: { docId: string }) {
         onCancel={() => setConfirmClear(false)}
       />
 
-      <Drawer open={selectedCitation !== null} onClose={() => setSelectedCitation(null)} title={selectedCitation ? t.citationTitle(selectedCitation.n) : ''}>
-        {selectedCitation && <CitationDetail citation={selectedCitation} />}
-      </Drawer>
-
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
     </div>
   );
 }
 
-const bubbleBase = {
-  alignSelf: 'flex-start' as const,
-  maxWidth: '90%',
-  background: 'var(--surface-card)',
-  border: 'var(--stroke-hairline) solid var(--border-subtle)',
-  borderRadius: 'var(--radius-md)',
-  padding: '14px 18px',
-  fontSize: 'var(--fs-ui-md)',
-  lineHeight: 'var(--lh-body)',
-  color: 'var(--text-body)',
-  display: 'flex' as const,
-  flexDirection: 'column' as const,
-  gap: 'var(--space-2)',
-};
-
-function LiveBubble({ state, onCitationClick }: { state: ReturnType<typeof useChatStream>['state']; onCitationClick: (c: Citation) => void }) {
-  const { t } = useLang();
-  const statusKey = state.statusNode && state.statusNode in STATUS_NODE_KEY ? STATUS_NODE_KEY[state.statusNode as keyof typeof STATUS_NODE_KEY] : null;
-
-  return (
-    <div style={bubbleBase}>
-      {state.answer ? (
-        <MessageBody text={state.answer} citations={state.citations} onCitationClick={onCitationClick} />
-      ) : (
-        <span className="chat-status-pulse" style={{ color: 'var(--text-muted)' }}>{statusKey ? t[statusKey] : t.chatSending}</span>
-      )}
-    </div>
-  );
-}
-
-function TurnBubbles({ turn, onCitationClick }: { turn: Turn; onCitationClick: (c: Citation) => void }) {
+function EmptyChat({ onPick }: { onPick: (question: string) => void }) {
   const { t } = useLang();
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-      <div
-        style={{
-          alignSelf: 'flex-end',
-          maxWidth: '78%',
-          background: 'var(--xy-red-700)',
-          color: '#fff',
-          borderRadius: 'var(--radius-md)',
-          padding: '14px 18px',
-          fontSize: 'var(--fs-ui-md)',
-          whiteSpace: 'pre-wrap',
-        }}
-      >
-        {turn.question}
-      </div>
-      <div style={bubbleBase}>
-        {!turn.complete && <Badge tone="brand">{t.chatInterrupted}</Badge>}
-        <MessageBody text={turn.answer} citations={turn.citations} onCitationClick={onCitationClick} />
-        {turn.citations.length > 0 && (
-          <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', marginTop: 'var(--space-2)' }}>
-            {turn.citations.map((c) => {
-              const label = citationShortLabel(c);
-              return (
-                <Pill key={c.n} size="sm" tone="soft" style={{ cursor: 'pointer' }}>
-                  <span onClick={() => onCitationClick(c)}>
-                    [{c.n}]{label && ` ${label}`}
-                  </span>
-                </Pill>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CitationDetail({ citation }: { citation: Citation }) {
-  const { t } = useLang();
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-      <Badge tone="neutral">{t[SOURCE_LABEL_KEY[citation.source]]}</Badge>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', paddingTop: 24 }}>
       <div>
-        <div style={{ fontSize: 'var(--fs-ui-xs)', letterSpacing: 'var(--ls-caps)', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>
-          {t.citationPages}
-        </div>
-        <div style={{ fontSize: 'var(--fs-ui-sm)', color: 'var(--text-body)' }}>
-          {citation.pages.length > 0 ? citation.pages.join(', ') : t.citationNone}
-        </div>
+        <h2 style={{ margin: 0, fontSize: 'var(--fs-ui-md)', fontWeight: 'var(--fw-semibold)', color: 'var(--text-title)' }}>
+          {t.chatEmptyTitle}
+        </h2>
+        <p style={{ margin: '4px 0 0', color: 'var(--text-muted)' }}>{t.chatEmpty}</p>
       </div>
-      {citation.headings.length > 0 && (
-        <div>
-          <div style={{ fontSize: 'var(--fs-ui-xs)', letterSpacing: 'var(--ls-caps)', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>
-            {t.citationHeadings}
-          </div>
-          <div style={{ fontSize: 'var(--fs-ui-sm)', color: 'var(--text-body)' }}>{citation.headings.join(' › ')}</div>
-        </div>
-      )}
-      <div
-        style={{
-          fontSize: 'var(--fs-ui-sm)',
-          lineHeight: 'var(--lh-body)',
-          color: 'var(--text-body)',
-          whiteSpace: 'pre-wrap',
-          background: 'var(--surface-subtle)',
-          border: 'var(--stroke-hairline) solid var(--border-subtle)',
-          borderRadius: 'var(--radius-sm)',
-          padding: 'var(--space-4)',
-        }}
-      >
-        {citation.text}
+      <div style={{ display: 'grid', gap: 8 }}>
+        {t.chatSuggestions.map((question) => (
+          <button key={question} className="suggestion" onClick={() => onPick(question)}>
+            {question}
+          </button>
+        ))}
       </div>
+    </div>
+  );
+}
+
+function Question({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        alignSelf: 'flex-end',
+        maxWidth: '85%',
+        padding: '8px 12px',
+        borderRadius: 'var(--radius-md)',
+        background: 'var(--surface-subtle)',
+        color: 'var(--text-title)',
+        lineHeight: 'var(--lh-body)',
+        whiteSpace: 'pre-wrap',
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+interface SourceSelection {
+  selectedKey: string | null;
+  onSelect: (key: string, citation: Citation) => void;
+}
+
+function Sources({ scope, citations, selectedKey, onSelect }: SourceSelection & { scope: string; citations: Citation[] }) {
+  if (citations.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {citations.map((c) => {
+        const key = `${scope}:${c.n}`;
+        const label = citationShortLabel(c);
+        return (
+          <button key={key} className="chip" aria-pressed={selectedKey === key} onClick={() => onSelect(key, c)} title={label}>
+            <span style={{ color: 'var(--brand-primary)', fontWeight: 'var(--fw-semibold)' }}>{c.n}</span>
+            {label && <span className="truncate">{label}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function TurnView({ turn, selectedKey, onSelect }: SourceSelection & { turn: Turn }) {
+  const { t } = useLang();
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <Question text={turn.question} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {!turn.complete && (
+          <span style={{ fontSize: 'var(--fs-ui-xs)', fontWeight: 'var(--fw-medium)', color: 'var(--status-warning)' }}>
+            {t.chatInterrupted}
+          </span>
+        )}
+        <MessageBody text={turn.answer} citations={turn.citations} onCitationClick={(c) => onSelect(`${turn.id}:${c.n}`, c)} />
+        <Sources scope={turn.id} citations={turn.citations} selectedKey={selectedKey} onSelect={onSelect} />
+      </div>
+    </div>
+  );
+}
+
+function LiveAnswer({ state, selectedKey, onSelect }: SourceSelection & { state: StreamState }) {
+  const { t } = useLang();
+  // Between "done" and the refetched turn arriving, the stream is already idle: render nothing
+  // rather than flashing the "thinking" line again.
+  if (state.status === 'idle') return null;
+  if (!state.answer) {
+    const key = state.statusNode && state.statusNode in STATUS_NODE_KEY ? STATUS_NODE_KEY[state.statusNode as keyof typeof STATUS_NODE_KEY] : null;
+    return (
+      <span className="pulse" style={{ color: 'var(--text-muted)' }}>
+        {key ? t[key] : t.chatSending}
+      </span>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <MessageBody text={state.answer} citations={state.citations} onCitationClick={(c) => onSelect(`live:${c.n}`, c)} />
+      <Sources scope="live" citations={state.citations} selectedKey={selectedKey} onSelect={onSelect} />
     </div>
   );
 }

@@ -1,45 +1,42 @@
-import { Logo } from './design-system';
-import { LanguageSwitch } from './components/LanguageSwitch';
-import { DocumentsScreen } from './screens/DocumentsScreen';
+import { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { DocumentRail } from './components/DocumentRail';
+import { EmptyWorkspace } from './components/EmptyWorkspace';
+import { Toast } from './components/Toast';
 import { DocumentScreen } from './screens/DocumentScreen';
+import { api, ApiError } from './lib/api';
 import { useLang } from './lib/i18n';
-import { useHashRoute } from './lib/useHashRoute';
+import { navigate, useHashRoute } from './lib/useHashRoute';
 
-// Single-destination shell: the design system's XylmShellScreen pattern uses a 264px SideNav rail
-// for a multi-module product (Ask / Finance / HR / Documents / Governance). This app currently has
-// one top-level screen (the document list; a document's own page is a drill-down, not a nav item),
-// so a permanent empty rail would just eat width — a header carries the branding instead. Revisit
-// with SideNav if a second top-level section (e.g. settings) shows up.
+// One workspace instead of a list page and a detail page: the rail keeps every document one
+// click away while a document is open. Routes are unchanged (#/ and #/doc/{id}).
 function App() {
   const { t } = useLang();
+  const queryClient = useQueryClient();
   const route = useHashRoute();
-  const docMatch = route.match(/^\/doc\/(.+)$/);
+  const docId = route.match(/^\/doc\/(.+)$/)?.[1] ?? null;
+  const [toast, setToast] = useState<string | null>(null);
+
+  const upload = useMutation({
+    mutationFn: api.uploadDocument,
+    onSuccess: ({ doc_id }) => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+      navigate(`/doc/${doc_id}`);
+    },
+    onError: (error: unknown) => setToast(error instanceof ApiError ? error.detail : t.errorGeneric),
+  });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
-      <header
-        style={{
-          height: 'var(--app-topbar-h)',
-          flex: '0 0 auto',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 var(--space-6)',
-          borderBottom: 'var(--stroke-hairline) solid var(--border-subtle)',
-          background: 'var(--surface-card)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-          <Logo variant="mark" height={22} basePath="/design-system/assets/" />
-          <span style={{ fontSize: 'var(--fs-ui-sm)', fontWeight: 'var(--fw-semibold)', color: 'var(--text-title)' }}>
-            {t.appName}
-          </span>
-        </div>
-        <LanguageSwitch />
-      </header>
-      <main style={{ flex: 1, minHeight: 0, padding: 'var(--space-8) var(--space-6)', overflow: 'auto' }}>
-        {docMatch ? <DocumentScreen docId={docMatch[1]} /> : <DocumentsScreen />}
+    <div className="shell" data-doc={docId !== null}>
+      <DocumentRail activeId={docId} onUpload={upload.mutate} uploading={upload.isPending} />
+      <main className="workspace">
+        {docId ? (
+          <DocumentScreen key={docId} docId={docId} />
+        ) : (
+          <EmptyWorkspace onUpload={upload.mutate} uploading={upload.isPending} />
+        )}
       </main>
+      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
     </div>
   );
 }

@@ -1,7 +1,6 @@
-/* Global reset. All real styling lives in the XY Intelligence design-system tokens
-   (design-system/styles.css) and component inline styles — this file only sets up
-   the page itself. Light is the theme this app ships (see main.tsx) — colors.css's
-   :root palette, no data-theme override. */
+/* Global reset plus the few layout rules inline styles can't express (grid shell, :hover,
+   :focus-within, media queries). Colors, type, spacing all come from design-system tokens.
+   Light theme: colors.css :root, no data-theme override (see main.tsx). */
 * {
   box-sizing: border-box;
 }
@@ -15,11 +14,13 @@ body,
 
 body {
   font-family: var(--font-core);
+  font-size: var(--fs-ui-sm);
   background: var(--surface-page);
   color: var(--text-body);
-  /* Numbers (progress %, elapsed time, counts) get a fixed digit width so they don't
-     shift the surrounding layout on every poll tick. */
+  /* Progress %, elapsed time and counts re-render on every poll; fixed digit width stops them
+     nudging the layout each tick. */
   font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
 
 button {
@@ -31,61 +32,316 @@ img {
   max-width: 100%;
 }
 
-/* Backdrop for native <dialog> (see components/ConfirmDialog.tsx) — inline styles can't
-   reach ::backdrop, so this is the one global rule that isn't a design-system token. */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 dialog::backdrop {
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(2, 2, 2, 0.4);
 }
 
-/* Document-name link in the documents table (DocumentsScreen.tsx): quiet by default so a
-   dense list of names doesn't read as a wall of red underlines, but still affords itself as
-   clickable on hover/focus. Inline styles can't express :hover, hence the one class. */
-.doc-link {
-  color: var(--text-title);
+/* ---- App shell: document rail | workspace ---- */
+.shell {
+  display: grid;
+  grid-template-columns: 288px minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-subtle);
+  border-right: var(--stroke-hairline) solid var(--border-subtle);
+}
+.rail[data-drop='true'] {
+  background: var(--surface-brand-tint);
+  box-shadow: inset 0 0 0 2px var(--border-brand-soft);
+}
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface-page);
+}
+
+/* Both pane headers share this height so their bottom hairlines read as one line. */
+.pane-header {
+  flex: 0 0 auto;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-5);
+  border-bottom: var(--stroke-hairline) solid var(--border-subtle);
+}
+
+.rail-item {
+  display: block;
+  position: relative;
+  padding: 9px 12px;
+  margin: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-body);
   text-decoration: none;
-  transition: color var(--dur-fast) var(--ease-standard);
+  transition: background var(--dur-fast) var(--ease-standard);
 }
-.doc-link:hover,
-.doc-link:focus-visible {
-  color: var(--text-link);
-  text-decoration: underline;
+.rail-item:hover {
+  background: var(--surface-raised);
+}
+.rail-item[aria-current='page'] {
+  background: var(--surface-card);
+  box-shadow: inset 0 0 0 var(--stroke-hairline) var(--border-subtle);
+}
+.rail-item[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--brand-primary);
 }
 
-/* Drag-over affordance for the upload dropzone (DocumentsScreen.tsx). */
-.upload-dropzone {
-  border: var(--stroke-hairline) dashed var(--border-subtle);
+.truncate {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.quiet-button {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--fs-ui-xs);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
+}
+.quiet-button:hover {
+  color: var(--text-title);
+  background: var(--surface-subtle);
+}
+.quiet-button[data-tone='danger']:hover {
+  color: var(--status-danger);
+  background: var(--surface-danger-soft);
+}
+
+/* Segmented tabs in the workspace header (Chat / Outline). */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+}
+.segmented button {
+  border: none;
+  background: transparent;
+  padding: 4px 12px;
+  border-radius: 5px;
+  font-size: var(--fs-ui-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.segmented button[aria-selected='true'] {
+  background: var(--surface-card);
+  color: var(--text-title);
+  box-shadow: 0 1px 2px rgba(2, 2, 2, 0.08);
+}
+
+/* ---- Chat ---- */
+.chat-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+.chat-layout[data-sources='true'] {
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+
+.chat-column {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 var(--space-6);
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding: 6px 6px 6px 14px;
+  border: var(--stroke-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  box-shadow: 0 1px 2px rgba(2, 2, 2, 0.04);
+  transition: border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+}
+.composer:focus-within {
+  border-color: var(--border-brand-soft);
+  box-shadow: 0 0 0 3px rgba(192, 0, 0, 0.08);
+}
+.composer textarea {
+  flex: 1;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  padding: 7px 0;
+  font: inherit;
+  font-size: var(--fs-ui-sm);
+  line-height: var(--lh-body);
+  color: var(--text-title);
+  max-height: 160px;
+  field-sizing: content;
+}
+.composer textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 3px 8px;
+  border: var(--stroke-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--text-card-body);
+  font-size: var(--fs-ui-xs);
+  cursor: pointer;
   transition: border-color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
 }
-.upload-dropzone[data-active='true'] {
+.chip:hover {
+  border-color: var(--border-brand-soft);
+}
+.chip[aria-pressed='true'] {
+  border-color: var(--border-brand-soft);
+  background: var(--surface-brand-tint);
+}
+
+.suggestion {
+  text-align: left;
+  padding: 10px 12px;
+  border: var(--stroke-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--text-body);
+  font-size: var(--fs-ui-sm);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
+}
+.suggestion:hover {
+  border-color: var(--border-brand-soft);
+  background: var(--surface-brand-tint);
+}
+
+.source-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: var(--stroke-hairline) solid var(--border-subtle);
+  background: var(--surface-card);
+  animation: panel-in var(--dur-base) var(--ease-out);
+}
+@keyframes panel-in {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- Outline ---- */
+.outline-node {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  font-size: var(--fs-ui-sm);
+  color: var(--text-body);
+  cursor: pointer;
+}
+.outline-node:hover {
+  background: var(--surface-subtle);
+}
+.outline-node[aria-current='true'] {
+  background: var(--surface-brand-tint);
+  color: var(--brand-primary);
+  font-weight: var(--fw-medium);
+}
+
+/* ---- Upload drop target on the empty workspace ---- */
+.dropzone {
+  border: var(--stroke-hairline) dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
+}
+.dropzone[data-drop='true'] {
   border-color: var(--brand-primary);
   background: var(--surface-brand-tint);
 }
 
-/* Skeleton row shown while the documents list is loading (DocumentsScreen.tsx). */
+/* ---- Loading / waiting ---- */
 .skeleton-block {
   background: var(--surface-raised);
   border-radius: var(--radius-sm);
-  animation: skeleton-pulse 1.4s ease-in-out infinite;
+  animation: pulse 1.4s ease-in-out infinite;
 }
-@media (prefers-reduced-motion: reduce) {
-  .skeleton-block {
-    animation: none;
-    opacity: 0.6;
-  }
+.pulse {
+  animation: pulse 1.4s ease-in-out infinite;
 }
-@keyframes skeleton-pulse {
-  0%, 100% { opacity: 0.5; }
+@keyframes pulse {
+  0%, 100% { opacity: 0.45; }
   50% { opacity: 1; }
 }
 
-/* "Searching the document…" style status line shown before the first answer token arrives
-   (ChatPanel.tsx's LiveBubble) -- a plain static line reads as stalled, not working. */
-.chat-status-pulse {
-  animation: skeleton-pulse 1.4s ease-in-out infinite;
+.mobile-only {
+  display: none;
 }
-@media (prefers-reduced-motion: reduce) {
-  .chat-status-pulse {
-    animation: none;
+
+@media (max-width: 767px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .shell[data-doc='true'] .rail,
+  .shell[data-doc='false'] .workspace {
+    display: none;
+  }
+  .mobile-only {
+    display: inline-flex;
+  }
+  .chat-layout[data-sources='true'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .source-panel {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+  }
+  .chat-column {
+    padding: 0 var(--space-4);
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-block,
+  .pulse,
+  .source-panel {
+    animation: none;
+  }
+}
