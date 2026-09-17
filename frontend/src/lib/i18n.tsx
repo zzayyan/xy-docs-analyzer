@@ -12,9 +12,10 @@ export interface Dict {
   railEmpty: string;
   dropActive: string;
 
-  emptyHeader: string;
   emptyTitle: string;
   emptyBody: string;
+
+  modelLabel: string;
 
   uploadButton: string;
   uploadUploading: string;
@@ -65,6 +66,7 @@ export interface Dict {
   chatClearConfirmTitle: string;
   chatClearConfirmBody: string;
   chatInterrupted: string;
+  chatStatusContextualize: string;
   chatStatusVectorRetrieve: string;
   chatStatusTreeSearch: string;
   chatStatusKgRetrieve: string;
@@ -97,10 +99,10 @@ const en: Dict = {
   railEmpty: 'No documents yet. Upload one to start.',
   dropActive: 'Drop to upload',
 
-  emptyHeader: 'New analysis',
   emptyTitle: 'Analyze a document',
-  emptyBody:
-    'Drop a file here or choose one to upload. You can ask questions as soon as processing finishes, and long documents also get a browsable outline.',
+  emptyBody: 'Ask questions as soon as processing finishes; long documents also get a browsable outline.',
+
+  modelLabel: 'Model',
 
   uploadButton: 'Upload',
   uploadUploading: 'Uploading…',
@@ -152,6 +154,7 @@ const en: Dict = {
   chatClearConfirmTitle: 'Clear chat history?',
   chatClearConfirmBody: 'All questions and answers for this document will be permanently removed.',
   chatInterrupted: 'Interrupted before finishing',
+  chatStatusContextualize: 'Understanding the question…',
   chatStatusVectorRetrieve: 'Searching the document…',
   chatStatusTreeSearch: 'Reading the outline…',
   chatStatusKgRetrieve: 'Reading the knowledge graph…',
@@ -184,10 +187,10 @@ const id: Dict = {
   railEmpty: 'Belum ada dokumen. Unggah satu untuk mulai.',
   dropActive: 'Lepas untuk mengunggah',
 
-  emptyHeader: 'Analisis baru',
   emptyTitle: 'Analisis dokumen',
-  emptyBody:
-    'Seret berkas ke sini atau pilih berkas untuk diunggah. Anda bisa bertanya begitu proses selesai, dan dokumen panjang juga mendapat daftar isi yang bisa dijelajahi.',
+  emptyBody: 'Anda bisa bertanya begitu proses selesai; dokumen panjang juga mendapat daftar isi yang bisa dijelajahi.',
+
+  modelLabel: 'Model',
 
   uploadButton: 'Unggah',
   uploadUploading: 'Mengunggah…',
@@ -239,6 +242,7 @@ const id: Dict = {
   chatClearConfirmTitle: 'Hapus riwayat chat?',
   chatClearConfirmBody: 'Semua pertanyaan dan jawaban untuk dokumen ini akan dihapus permanen.',
   chatInterrupted: 'Terputus sebelum selesai',
+  chatStatusContextualize: 'Memahami pertanyaan…',
   chatStatusVectorRetrieve: 'Mencari di dokumen…',
   chatStatusTreeSearch: 'Membaca daftar isi…',
   chatStatusKgRetrieve: 'Membaca graf pengetahuan…',

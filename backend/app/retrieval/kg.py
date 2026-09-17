@@ -47,9 +47,11 @@ class QuestionEntities(BaseModel):
     names: list[str] = Field(description="Entity names mentioned in the question")
 
 
-def search(file_id: str, question: str, k: int = 6, triple_limit: int = 30) -> tuple[list[str], list[dict]]:
+def search(
+    file_id: str, question: str, k: int = 6, triple_limit: int = 30, model: str | None = None
+) -> tuple[list[str], list[dict]]:
     """Return (graph facts as text lines, chunks that mention the matched entities)."""
-    extracted = llm().with_structured_output(QuestionEntities).invoke([("system", SYSTEM_PROMPT), ("human", question)])
+    extracted = llm(model).with_structured_output(QuestionEntities).invoke([("system", SYSTEM_PROMPT), ("human", question)])
     names = [name for name in (LUCENE_SPECIAL.sub(" ", n).strip() for n in extracted.names) if name]
     if not names:
         return [], []

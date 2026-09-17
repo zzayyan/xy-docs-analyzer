@@ -52,11 +52,13 @@ export function useChatStream(docId: string, callbacks: ChatStreamCallbacks = {}
   useEffect(() => close, [docId, close]);
 
   const send = useCallback(
-    (question: string) => {
+    (question: string, model?: string | null) => {
       close();
       setState({ ...IDLE, status: 'streaming' });
 
-      const url = `${API_URL}/chat/stream?${new URLSearchParams({ doc_id: docId, question })}`;
+      const params = new URLSearchParams({ doc_id: docId, question });
+      if (model) params.set('model', model);
+      const url = `${API_URL}/chat/stream?${params}`;
       const es = new EventSource(url);
       esRef.current = es;
 

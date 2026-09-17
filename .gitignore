@@ -4,3 +4,8 @@ __pycache__/
 .pytest_cache/
 node_modules/
 dist/
+
+# Locally-installed agent skills (personal tooling, not shared via the repo)
+.agents/skills/
+.claude/skills/
+skills-lock.json

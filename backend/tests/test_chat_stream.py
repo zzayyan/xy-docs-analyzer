@@ -41,9 +41,36 @@ def parse_sse(text: str) -> list[tuple[str, object]]:
 @pytest.fixture
 def stubbed(monkeypatch):
     monkeypatch.setattr(store_module, "get_file", fake_document)
+    monkeypatch.setattr(store_module, "list_turns", lambda file_id: [])
     saved = {}
     monkeypatch.setattr(store_module, "save_turn", lambda file_id, **kw: saved.update(kw) or saved)
     return saved
+
+
+def test_chat_history_excludes_incomplete_turns_and_keeps_question_answer_only(monkeypatch):
+    monkeypatch.setattr(store_module, "list_turns", lambda file_id: [
+        {"id": "t1", "question": "q1", "answer": "a1", "citations": [], "mode": "short", "complete": True, "created_at": 1},
+        {"id": "t2", "question": "q2", "answer": "", "citations": [], "mode": "short", "complete": False, "created_at": 2},
+    ])
+    assert api_module.chat_history("d1") == [{"question": "q1", "answer": "a1"}]
+
+
+def test_stream_answer_passes_history_through_to_the_graph(stubbed, monkeypatch):
+    monkeypatch.setattr(store_module, "list_turns", lambda file_id: [
+        {"id": "t1", "question": "earlier q", "answer": "earlier a", "citations": [], "mode": "long", "complete": True, "created_at": 1},
+    ])
+    seen_state = {}
+
+    async def fake_stream(state, stream_mode):
+        seen_state.update(state)
+        yield ("updates", {"fuse": {"contexts": []}})
+
+    monkeypatch.setattr(api_module.workflow, "astream", fake_stream)
+
+    with client.stream("GET", "/chat/stream", params={"doc_id": "d1", "question": "hi?"}) as r:
+        r.read()
+
+    assert seen_state["history"] == [{"question": "earlier q", "answer": "earlier a"}]
 
 
 def test_citations_precede_tokens_leaked_nodes_filtered_newline_survives(stubbed, monkeypatch):

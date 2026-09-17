@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../design-system';
 import { ConfirmDialog } from './ConfirmDialog';
 import { MessageBody } from './MessageBody';
+import { ModelSwitch } from './ModelSwitch';
 import { SourcePanel } from './SourcePanel';
 import { Toast } from './Toast';
 import { api, ApiError, type Citation, type Turn } from '../lib/api';
@@ -10,6 +11,7 @@ import { useChatStream, type StreamState } from '../lib/useChatStream';
 import { useLang } from '../lib/i18n';
 
 const STATUS_NODE_KEY = {
+  contextualize: 'chatStatusContextualize',
   vector_retrieve: 'chatStatusVectorRetrieve',
   tree_search: 'chatStatusTreeSearch',
   kg_retrieve: 'chatStatusKgRetrieve',
@@ -37,11 +39,23 @@ export function ChatPanel({ docId }: { docId: string }) {
   const [confirmClear, setConfirmClear] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  const [modelOverride, setModelOverride] = useState<string | null>(null);
+  // Shares DocumentScreen.tsx's exact query key, so this reads from cache instead of firing a
+  // second request for the same document.
+  const documentQuery = useQuery({ queryKey: ['document', docId], queryFn: () => api.getDocument(docId) });
+  const modelsQuery = useQuery({ queryKey: ['models'], queryFn: api.models });
+  const model = modelOverride ?? documentQuery.data?.llm_model ?? modelsQuery.data?.default ?? null;
+
   const turnsQuery = useQuery({ queryKey: ['turns', docId], queryFn: () => api.listTurns(docId) });
   // The backend persists a Turn on success, failure and mid-stream disconnect alike, so every
   // terminal path refetches history, then drops the optimistic question once the real one is in.
+  // Also refetches the document: a switched model is persisted server-side on the same request,
+  // so this is what picks that up into documentQuery.data.llm_model (and DocumentScreen's header).
   const settle = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['turns', docId] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['turns', docId] }),
+      queryClient.invalidateQueries({ queryKey: ['document', docId] }),
+    ]);
     setPendingQuestion(null);
   };
   const stream = useChatStream(docId, {
@@ -73,7 +87,7 @@ export function ChatPanel({ docId }: { docId: string }) {
     if (!question || streaming) return;
     setDraft('');
     setPendingQuestion(question);
-    stream.send(question);
+    stream.send(question, model);
   };
 
   useEffect(() => {
@@ -124,8 +138,11 @@ export function ChatPanel({ docId }: { docId: string }) {
               {t.chatSend}
             </Button>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 26, marginTop: 4 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t.chatComposerHint}</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 26, marginTop: 4, gap: 'var(--space-3)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <ModelSwitch value={model} onChange={setModelOverride} choices={modelsQuery.data?.models ?? []} />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t.chatComposerHint}</span>
+            </div>
             {turns.length > 0 && (
               <button className="quiet-button" onClick={() => setConfirmClear(true)} disabled={streaming}>
                 {t.chatClear}

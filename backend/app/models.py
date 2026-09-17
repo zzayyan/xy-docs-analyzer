@@ -15,11 +15,18 @@ def _api_key(key: str, env_var: str) -> str:
     return key
 
 
+def llm(model: str | None = None) -> BaseChatModel:
+    # A thin wrapper around the cached builder so every caller -- whether it passes a document's
+    # chosen model, or nothing -- resolves to the same cache key for the default model, instead of
+    # _llm(None) and _llm(settings.llm_model) building two equivalent clients.
+    return _llm(model or settings.llm_model)
+
+
 @lru_cache
-def llm() -> BaseChatModel:
+def _llm(model: str) -> BaseChatModel:
     if settings.llm_provider == "openai":
         return ChatOpenAI(
-            model=settings.llm_model,
+            model=model,
             api_key=_api_key(settings.llm_api_key, "LLM_API_KEY"),
             base_url=settings.llm_base_url,
             temperature=0,
@@ -27,7 +34,7 @@ def llm() -> BaseChatModel:
             reasoning_effort="none",
         )
     return ChatOllama(
-        model=settings.llm_model,
+        model=model,
         base_url=settings.llm_base_url,
         temperature=0,
         num_ctx=settings.llm_num_ctx,

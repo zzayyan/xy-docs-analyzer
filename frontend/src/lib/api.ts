@@ -18,6 +18,11 @@ export interface Limits {
   max_pages: number;
 }
 
+export interface ModelsInfo {
+  models: string[];
+  default: string;
+}
+
 export interface Document {
   id: string;
   name: string;
@@ -31,6 +36,7 @@ export interface Document {
   error: string | null;
   step_done: number | null;
   step_total: number | null;
+  llm_model: string | null;
 }
 
 export interface Citation {
@@ -111,6 +117,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   limits: () => request<Limits>('/limits'),
+
+  models: () => request<ModelsInfo>('/models'),
 
   listDocuments: () => request<Document[]>('/documents'),
 

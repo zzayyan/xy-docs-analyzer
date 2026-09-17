@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { Logo } from '../design-system';
 import { UploadButton } from './UploadButton';
 import { api } from '../lib/api';
 import { useFileDrop } from '../lib/useFileDrop';
@@ -11,16 +12,15 @@ export function EmptyWorkspace({ onUpload, uploading }: { onUpload: (file: File)
 
   return (
     <>
-      <div className="pane-header">
-        <span style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-title)' }}>{t.emptyHeader}</span>
-      </div>
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '48px var(--space-6)' }}>
-        <div
-          className="dropzone"
-          data-drop={drop.active}
-          {...drop.handlers}
-          style={{ maxWidth: 640, padding: '28px 28px 24px', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}
-        >
+      <div className="pane-header" />
+      <div
+        className="workspace-empty"
+        data-drop={drop.active}
+        {...drop.handlers}
+        style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-6)' }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)', maxWidth: 380, textAlign: 'center' }}>
+          <Logo variant="mark" height={32} basePath="/design-system/assets/" style={{ opacity: 0.5 }} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <h1
               style={{
@@ -33,11 +33,9 @@ export function EmptyWorkspace({ onUpload, uploading }: { onUpload: (file: File)
             >
               {drop.active ? t.dropActive : t.emptyTitle}
             </h1>
-            <p style={{ margin: 0, maxWidth: '56ch', lineHeight: 'var(--lh-body)', color: 'var(--text-card-body)', textWrap: 'pretty' }}>
-              {t.emptyBody}
-            </p>
+            <p style={{ margin: 0, lineHeight: 'var(--lh-body)', color: 'var(--text-card-body)' }}>{t.emptyBody}</p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
             <UploadButton onFile={onUpload} uploading={uploading} size="md" />
             {limitsQuery.data && (
               <span style={{ fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>

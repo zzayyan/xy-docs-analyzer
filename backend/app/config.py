@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     llm_model: str = "qwen3:14b"
     # Ollama's default context is small and truncates silently; ignored by OpenAI-compatible servers
     llm_num_ctx: int = 16384
+    # Extra model names selectable per document at upload time, alongside llm_model (the default).
+    # Comma-separated; every one must be reachable through the single llm_provider/llm_base_url/
+    # llm_api_key above -- this offers model *names*, not a second provider.
+    llm_model_choices: str = ""
 
     embed_provider: Provider = "ollama"
     embed_base_url: str = "http://localhost:11434"
@@ -39,6 +43,10 @@ class Settings(BaseSettings):
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "password123"
+
+    def available_llm_models(self) -> list[str]:
+        extra = [m.strip() for m in self.llm_model_choices.split(",") if m.strip()]
+        return [self.llm_model] + [m for m in extra if m != self.llm_model]
 
 
 settings = Settings()

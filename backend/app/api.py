@@ -13,7 +13,7 @@ from app import store
 from app.config import settings
 from app.graph import to_citations, workflow
 from app.ingest.convert import page_count
-from app.ingest.pipeline import create_file, ingest
+from app.ingest.pipeline import create_file, ingest, set_status
 
 READ_CHUNK = 1024 * 1024
 
@@ -47,6 +47,11 @@ class Limits(BaseModel):
     max_pages: int
 
 
+class Models(BaseModel):
+    models: list[str]
+    default: str
+
+
 class Upload(BaseModel):
     doc_id: str
 
@@ -64,6 +69,7 @@ class Document(BaseModel):
     error: str | None = None
     step_done: int | None = None
     step_total: int | None = None
+    llm_model: str | None = None
 
 
 class Citation(BaseModel):
@@ -119,6 +125,12 @@ def get_file(doc_id: str) -> dict:
     return file
 
 
+def chat_history(doc_id: str) -> list[dict]:
+    # Interrupted turns are noise, not a real prior exchange -- excluded rather than fed to
+    # graph.py's contextualize/generate as if the partial answer were a complete one.
+    return [{"question": t["question"], "answer": t["answer"]} for t in store.list_turns(doc_id) if t["complete"]]
+
+
 def ingest_and_cleanup(doc_id: str, path: str) -> None:
     try:
         ingest(doc_id, path)
@@ -162,6 +174,11 @@ def upload_document(file: UploadFile, background: BackgroundTasks) -> dict:
 @app.get("/limits", response_model=Limits)
 def limits() -> dict:
     return {"max_upload_mb": settings.max_upload_mb, "max_pages": settings.max_pages}
+
+
+@app.get("/models", response_model=Models)
+def models() -> dict:
+    return {"models": settings.available_llm_models(), "default": settings.llm_model}
 
 
 @app.get("/documents", response_model=list[Document])
@@ -211,7 +228,10 @@ def chat(body: ChatRequest) -> dict:
     file = get_file(body.doc_id)
     if file["status"] != "done":
         raise HTTPException(status_code=409, detail=f"document is not ready (status: {file['status']})")
-    result = workflow.invoke({"question": body.question, "doc_id": body.doc_id, "mode": file["mode"]})
+    result = workflow.invoke({
+        "question": body.question, "doc_id": body.doc_id, "mode": file["mode"],
+        "model": file.get("llm_model"), "history": chat_history(body.doc_id),
+    })
     turn = store.save_turn(
         body.doc_id, question=body.question, answer=result["answer"],
         citations=result["citations"], mode=file["mode"], complete=True,
@@ -226,7 +246,9 @@ def sse(event: str, data: object) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-async def stream_answer(doc_id: str, question: str, mode: str) -> AsyncIterator[str]:
+async def stream_answer(
+    doc_id: str, question: str, mode: str, model: str | None = None, history: list[dict] | None = None,
+) -> AsyncIterator[str]:
     # Must be a real async generator over workflow.astream(), not a sync generator over
     # workflow.stream(): a sync generator passed to StreamingResponse gets wrapped in
     # iterate_in_threadpool, which calls next() on it from a worker thread with no way to
@@ -240,7 +262,10 @@ async def stream_answer(doc_id: str, question: str, mode: str) -> AsyncIterator[
     citations: list[dict] = []
     complete = False
     try:
-        async for kind, payload in workflow.astream({"question": question, "doc_id": doc_id, "mode": mode}, stream_mode=["updates", "messages"]):
+        async for kind, payload in workflow.astream(
+            {"question": question, "doc_id": doc_id, "mode": mode, "model": model, "history": history or []},
+            stream_mode=["updates", "messages"],
+        ):
             if kind == "updates":
                 node, output = next(iter(payload.items()))
                 if node == "fuse":
@@ -282,14 +307,23 @@ async def stream_answer(doc_id: str, question: str, mode: str) -> AsyncIterator[
 
 
 @app.get("/chat/stream")
-def chat_stream(doc_id: str, question: str) -> StreamingResponse:
+def chat_stream(doc_id: str, question: str, model: str | None = None) -> StreamingResponse:
     # 404/409 are raised here, before StreamingResponse starts -- so "document not found" or "not
     # ready" are still real HTTP status codes, not something buried inside a 200 event stream.
     file = get_file(doc_id)
     if file["status"] != "done":
         raise HTTPException(status_code=409, detail=f"document is not ready (status: {file['status']})")
+    # A mismatch here means stale frontend state (its /models list is out of date with .env), not
+    # a plausible user typo -- the picker is a dropdown, not free text -- so this fails loud rather
+    # than silently falling back to the stored default.
+    if model is not None and model not in settings.available_llm_models():
+        raise HTTPException(status_code=400, detail=f"unknown model: {model}")
+    # Switching models here is meant to stick, like Claude's own model switcher: the next reload
+    # (or the next question, if the user doesn't touch the picker again) keeps using it.
+    if model is not None and model != file.get("llm_model"):
+        set_status(doc_id, llm_model=model)
     return StreamingResponse(
-        stream_answer(doc_id, question, file["mode"]),
+        stream_answer(doc_id, question, file["mode"], model or file.get("llm_model"), chat_history(doc_id)),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

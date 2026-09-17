@@ -39,7 +39,7 @@ def outline_line(section: dict) -> str:
     return f"{'  ' * max(section['level'] - 1, 0)}[{short_id}] {section['title']}{pages}: {section['summary']}"
 
 
-def search(file_id: str, question: str, limit: int = 12) -> list[dict]:
+def search(file_id: str, question: str, limit: int = 12, model: str | None = None) -> list[dict]:
     """Reasoning-based retrieval: the LLM reads the section outline and picks sections, no embeddings involved."""
     sections = graph().query(SECTIONS_QUERY, {"file_id": file_id})
     if not sections:
@@ -47,7 +47,7 @@ def search(file_id: str, question: str, limit: int = 12) -> list[dict]:
 
     # ponytail: whole outline goes into one prompt; for very large trees show only levels <= 2 first, then drill down
     outline = "\n".join(outline_line(s) for s in sections)
-    choice = llm().with_structured_output(SectionChoice).invoke([
+    choice = llm(model).with_structured_output(SectionChoice).invoke([
         ("system", SYSTEM_PROMPT),
         ("human", f"Outline:\n{outline}\n\nQuestion: {question}"),
     ])

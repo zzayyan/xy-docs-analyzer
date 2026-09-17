@@ -63,6 +63,7 @@ export function DocumentScreen({ docId }: { docId: string }) {
               {doc.mode && <span>{doc.mode === 'long' ? t.modeLong : t.modeShort}</span>}
               {doc.chunks !== null && <span>{t.outlineChunkCount(doc.chunks)}</span>}
               {doc.created_at && <span>{formatRelative(doc.created_at, lang, t.relativeJustNow)}</span>}
+              {doc.llm_model && <span>{doc.llm_model}</span>}
             </span>
           </div>
         ) : (
