@@ -15,8 +15,9 @@ from app.models import llm
 # The cap is what makes a runaway cost seconds instead of minutes (measured: 7s against 110s).
 EXTRACT_MAX_TOKENS = 3000
 # Greedy decoding (temperature 0) repeats itself forever on some passages -- measured on Qwen3.5-4B,
-# where one chunk ran to 15968 tokens of repeated rows every time, and read cleanly off-greedy.
-RETRY_TEMPERATURE = 0.3
+# where one chunk ran to 15968 tokens of repeated rows every time. 0.3 still ran away on 3 of 8 retries
+# of those chunks, which failed whole runs at random; 0.7 on none of 8 (see docs/adr/0001).
+RETRY_TEMPERATURE = 0.7
 # The merge pass answers with row numbers only, so its output is small even for a long table.
 MERGE_MAX_TOKENS = 2000
 # Two values of one column describe the same thing when they share more than this share of their

@@ -44,6 +44,20 @@ Temperature and the cap are set when the client is built, not bound onto it afte
 `with_structured_output()` drops a kwarg passed to `.bind()`, which silently left an intended cap
 with no effect at all.
 
+### Amended 2026-09-18: retry at 0.7, not 0.3
+
+The first version retried at `RETRY_TEMPERATURE = 0.3`. A later run still failed with both reads of
+one chunk running away. Measured on the two chunks known to loop, four retries each:
+
+| Retry temperature | Runaways |
+| --- | --- |
+| 0.3 | 3 of 8 |
+| 0.7 | 0 of 8 |
+
+At 0.3 a run with one awkward chunk failed roughly one time in three, at random. The retry now runs
+at 0.7. The trade-off is that the retried read is freer to paraphrase instead of quoting; it applies
+only to the chunks whose greedy read already ran away.
+
 ## Consequences
 
 - A runaway chunk costs one wasted capped read (~20s) instead of failing the run.
