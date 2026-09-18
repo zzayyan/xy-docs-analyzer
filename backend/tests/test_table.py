@@ -161,3 +161,54 @@ def test_suggest_tables_returns_candidate_tables_with_their_columns(monkeypatch)
         {"title": "Kewajiban", "columns": [{"name": "Pasal", "description": "Nomor pasal"}]},
     ]
     assert "Bab I" in "\n".join(text for _, text in seen["messages"])
+
+
+class LoopingModel:
+    """A model that runs away on greedy decoding, the way Qwen3.5-4B does on some chunks."""
+
+    def __init__(self, temperature: float, calls: list):
+        self.temperature = temperature
+        self.calls = calls
+
+    def with_structured_output(self, schema):
+        return self
+
+    def invoke(self, messages):
+        self.calls.append(self.temperature)
+        if self.temperature == 0:
+            raise ValueError("Could not parse response content as the length limit was reached")
+        return table.ChunkRows(rows=[table.ExtractedRow(values=["item"])])
+
+
+def fake_llm(calls: list, seen: list):
+    def build(model=None, *, temperature=0.0, max_tokens=None):
+        seen.append(max_tokens)
+        return LoopingModel(temperature, calls)
+
+    return build
+
+
+def test_a_chunk_the_model_loops_on_is_read_again_off_greedy(monkeypatch):
+    calls, capped = [], []
+    monkeypatch.setattr(table, "llm", fake_llm(calls, capped))
+
+    found = table.extract_one("text", COLUMNS, None)
+
+    assert calls == [0.0, table.RETRY_TEMPERATURE], "the retry must not repeat the greedy attempt"
+    assert capped == [table.EXTRACT_MAX_TOKENS] * 2, "both attempts are capped, so a runaway fails fast"
+    assert [row.values for row in found.rows] == [["item"]]
+
+
+def test_a_chunk_that_fails_twice_still_fails_the_run(monkeypatch):
+    class AlwaysFails(LoopingModel):
+        def invoke(self, messages):
+            self.calls.append(self.temperature)
+            raise ValueError("Could not parse response content as the length limit was reached")
+
+    def build(model=None, *, temperature=0.0, max_tokens=None):
+        return AlwaysFails(temperature, [])
+
+    monkeypatch.setattr(table, "llm", build)
+
+    with pytest.raises(ValueError, match="length limit"):
+        table.extract_one("text", COLUMNS, None)

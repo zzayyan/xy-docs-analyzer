@@ -15,28 +15,35 @@ def _api_key(key: str, env_var: str) -> str:
     return key
 
 
-def llm(model: str | None = None) -> BaseChatModel:
+def llm(model: str | None = None, *, temperature: float = 0.0, max_tokens: int | None = None) -> BaseChatModel:
     # A thin wrapper around the cached builder so every caller -- whether it passes a document's
     # chosen model, or nothing -- resolves to the same cache key for the default model, instead of
     # _llm(None) and _llm(settings.llm_model) building two equivalent clients.
-    return _llm(model or settings.llm_model)
+    #
+    # temperature and max_tokens are set on the client, not bound onto it afterwards: a kwarg bound
+    # with .bind() is dropped by with_structured_output(), which silently left an intended output cap
+    # with no effect (measured: the capped call still ran to 15968 tokens).
+    return _llm(model or settings.llm_model, temperature, max_tokens)
 
 
 @lru_cache
-def _llm(model: str) -> BaseChatModel:
+def _llm(model: str, temperature: float = 0.0, max_tokens: int | None = None) -> BaseChatModel:
     if settings.llm_provider == "openai":
         return ChatOpenAI(
             model=model,
             api_key=_api_key(settings.llm_api_key, "LLM_API_KEY"),
             base_url=settings.llm_base_url,
-            temperature=0,
+            temperature=temperature,
+            max_tokens=max_tokens,
             # Qwen3.5 on vLLM spends every token on reasoning and leaves content empty until it stops
             reasoning_effort="none",
         )
     return ChatOllama(
         model=model,
         base_url=settings.llm_base_url,
-        temperature=0,
+        temperature=temperature,
+        # Ollama's own name for a cap on the output; -1 is its default "no cap"
+        num_predict=max_tokens or -1,
         num_ctx=settings.llm_num_ctx,
         # Keeps qwen3 <think> output out of answers and extraction JSON
         reasoning=False,

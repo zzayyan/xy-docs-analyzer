@@ -13,6 +13,13 @@ from app.models import llm
 # How much of the document is shown when proposing columns: enough to pick up its own wording,
 # small enough to prepend to a single call. Sections come from the outline, so only long documents
 # have them; the opening chunks are what a short document has instead.
+# A chunk is at most CHUNK_MAX_TOKENS long, so its rows cannot honestly need more output than this.
+# The cap is what makes a runaway cost seconds instead of minutes (measured: 7s against 110s).
+EXTRACT_MAX_TOKENS = 3000
+# Greedy decoding (temperature 0) repeats itself forever on some passages -- measured on Qwen3.5-4B,
+# where one chunk ran to 15968 tokens of repeated rows every time, and read cleanly off-greedy.
+RETRY_TEMPERATURE = 0.3
+
 CONTEXT_SECTIONS = 40
 CONTEXT_SECTION_CHARS = 80
 CONTEXT_CHUNKS = 5
@@ -106,12 +113,18 @@ def suggest_tables(context: str, model: str | None = None) -> list[dict]:
 
 
 def extract_one(text: str, columns: list[dict], model: str | None) -> ChunkRows:
-    """One LLM call, no database access, so it is safe to run many at once."""
+    """One LLM call, no database access, so it is safe to run many at once.
+
+    Read once greedily, then once more off-greedy if that read runs away: the second read is what
+    keeps one awkward passage from costing a whole document its table (see docs/adr/0001)."""
     listed = "\n".join(f"{i}. {c['name']}: {c['description']}" for i, c in enumerate(columns, start=1))
-    return llm(model).with_structured_output(ChunkRows).invoke([
-        ("system", EXTRACT_SYSTEM),
-        ("human", f"Columns:\n{listed}\n\nPassage:\n{text}"),
-    ])
+    messages = [("system", EXTRACT_SYSTEM), ("human", f"Columns:\n{listed}\n\nPassage:\n{text}")]
+    try:
+        return llm(model, max_tokens=EXTRACT_MAX_TOKENS).with_structured_output(ChunkRows).invoke(messages)
+    except Exception:
+        return llm(
+            model, temperature=RETRY_TEMPERATURE, max_tokens=EXTRACT_MAX_TOKENS,
+        ).with_structured_output(ChunkRows).invoke(messages)
 
 
 def run(
