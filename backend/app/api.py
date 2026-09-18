@@ -1,5 +1,7 @@
+import io
 import json
 import mimetypes
+import re
 import shutil
 import tempfile
 import uuid
@@ -8,7 +10,8 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+import openpyxl
 from pydantic import BaseModel
 
 from app import store, table
@@ -137,6 +140,7 @@ class Chunk(BaseModel):
 
 
 class Row(BaseModel):
+    id: str
     values: dict[str, str]
     citations: list[Citation]
 
@@ -298,7 +302,8 @@ def extract_table(doc_id: str, table_id: str, columns: list[dict], model: str | 
         store.set_table_extraction(table_id, status="running", chunks_done=0, chunks_total=len(chunks))
         rows = run_table(chunks, columns, model, on_progress=progress, should_stop=cancelled)
         store.set_table_extraction(
-            table_id, status="done", progress=1.0, rows=rows,
+            # A row's id is its position when the run finished; deleting a row never renumbers the rest
+            table_id, status="done", progress=1.0, rows=[{**row, "id": str(i)} for i, row in enumerate(rows)],
             chunks_done=len(chunks), chunks_total=len(chunks),
         )
     except Stopped:
@@ -389,6 +394,54 @@ def cancel_table_extraction(doc_id: str, table_id: str) -> dict:
         raise HTTPException(status_code=409, detail=f"table extraction is already {extraction['status']}")
     store.set_table_extraction(table_id, status="cancelled")
     return {**extraction, "status": "cancelled"}
+
+
+@app.delete("/documents/{doc_id}/tables/{table_id}", status_code=204)
+def delete_document_table_extraction(doc_id: str, table_id: str) -> None:
+    # Also fine mid-run: the background task finds its TableExtraction gone, counts that as
+    # cancelled, and stops at the next chunk (see extract_table's should_stop).
+    document_table_extraction(doc_id, table_id)
+    store.delete_table_extraction(doc_id, table_id)
+
+
+@app.delete("/documents/{doc_id}/tables/{table_id}/rows/{row_id}", status_code=204)
+def delete_table_row(doc_id: str, table_id: str, row_id: str) -> None:
+    extraction = document_table_extraction(doc_id, table_id)
+    if extraction["status"] in IN_FLIGHT:
+        raise HTTPException(status_code=409, detail="the table extraction is still running")
+    rows = [row for row in extraction["rows"] if row["id"] != row_id]
+    if len(rows) == len(extraction["rows"]):
+        raise HTTPException(status_code=404, detail="row not found")
+    # ponytail: read-modify-write of the whole rows list, so two deletes landing at the same instant can
+    # lose one. One person cleaning one table cannot click that fast; a Cypher-side edit if that changes.
+    store.set_table_extraction(table_id, rows=rows)
+
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@app.get("/documents/{doc_id}/tables/{table_id}/export.xlsx")
+def export_table_extraction(doc_id: str, table_id: str) -> Response:
+    extraction = document_table_extraction(doc_id, table_id)
+    if extraction["status"] != "done":
+        raise HTTPException(status_code=409, detail=f"table extraction is {extraction['status']}, not done")
+    names = [column["name"] for column in extraction["columns"]]
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.append([*names, "Pages"])
+    for row in extraction["rows"]:
+        # Every page any citation of the row points at, once each, in reading order
+        pages = sorted({page for citation in row["citations"] for page in citation["pages"]})
+        sheet.append([*(row["values"].get(name, "") for name in names), ", ".join(map(str, pages)) or None])
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    # The request is typed by the user, in any script, and a header must be latin-1: keep only ASCII
+    # letters, digits, spaces and dashes, collapse what is left, fall back to "table" if nothing is
+    filename = " ".join(re.sub(r"[^A-Za-z0-9 _-]", " ", extraction["request"]).split())[:80] or "table"
+    return Response(
+        buffer.getvalue(), media_type=XLSX,
+        headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'},
+    )
 
 
 @app.get("/documents/{doc_id}/turns", response_model=list[Turn])

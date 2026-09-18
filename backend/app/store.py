@@ -73,6 +73,8 @@ ORDER BY e.created_at DESC
 
 GET_TABLE_EXTRACTION = "MATCH (e:TableExtraction {id: $id, file_id: $file_id}) RETURN e {.*} AS extraction"
 
+DELETE_TABLE_EXTRACTION = "MATCH (e:TableExtraction {id: $id, file_id: $file_id}) DETACH DELETE e"
+
 LIST_TURNS = """
 MATCH (t:Turn {file_id: $file_id})
 RETURN t.id AS id, t.question AS question, t.answer AS answer, t.citations AS citations,
@@ -153,7 +155,12 @@ def list_chunks(file_id: str, limit: int | None = None) -> list[dict]:
 
 
 def _table_extraction(row: dict) -> dict:
-    return {**row, "columns": json.loads(row["columns"]), "rows": json.loads(row.get("rows") or "[]")}
+    rows = json.loads(row.get("rows") or "[]")
+    # Runs saved before rows had ids get their position as one; the first row deleted from such a
+    # run writes the list back, which is what makes those ids stick from then on.
+    for i, r in enumerate(rows):
+        r.setdefault("id", str(i))
+    return {**row, "columns": json.loads(row["columns"]), "rows": rows}
 
 
 def create_table_extraction(file_id: str, request: str, columns: list[dict]) -> dict:
@@ -179,3 +186,7 @@ def list_table_extractions(file_id: str) -> list[dict]:
 def get_table_extraction(file_id: str, extraction_id: str) -> dict | None:
     rows = graph().query(GET_TABLE_EXTRACTION, {"id": extraction_id, "file_id": file_id})
     return _table_extraction(rows[0]["extraction"]) if rows else None
+
+
+def delete_table_extraction(file_id: str, extraction_id: str) -> None:
+    graph().query(DELETE_TABLE_EXTRACTION, {"id": extraction_id, "file_id": file_id})

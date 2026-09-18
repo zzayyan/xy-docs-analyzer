@@ -92,6 +92,7 @@ export interface Column {
 }
 
 export interface Row {
+  id: string;
   values: Record<string, string>;
   citations: Citation[];
 }
@@ -195,6 +196,14 @@ export const api = {
 
   cancelTable: (docId: string, tableId: string) =>
     request<TableExtraction>(`/documents/${docId}/tables/${tableId}/cancel`, { method: 'POST' }),
+
+  deleteTable: (docId: string, tableId: string) =>
+    request<void>(`/documents/${docId}/tables/${tableId}`, { method: 'DELETE' }),
+
+  deleteTableRow: (docId: string, tableId: string, rowId: string) =>
+    request<void>(`/documents/${docId}/tables/${tableId}/rows/${encodeURIComponent(rowId)}`, { method: 'DELETE' }),
+
+  tableExportUrl: (docId: string, tableId: string) => `${API_URL}/documents/${docId}/tables/${tableId}/export.xlsx`,
 
   listTables: (docId: string) => request<TableExtraction[]>(`/documents/${docId}/tables`),
 

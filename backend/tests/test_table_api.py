@@ -1,5 +1,8 @@
 """HTTP API for Table Extractions. The store and the model are faked, so no Neo4j or LLM needed
 (prior art: test_chat_stream.py)."""
+import io
+
+import openpyxl
 import pytest
 from fastapi.testclient import TestClient
 
@@ -43,6 +46,7 @@ def stubbed(monkeypatch):
     monkeypatch.setattr(store_module, "set_table_extraction", lambda table_id, **props: tables[table_id].update(props))
     monkeypatch.setattr(store_module, "list_table_extractions", lambda file_id: list(tables.values()))
     monkeypatch.setattr(store_module, "get_table_extraction", lambda file_id, table_id: tables.get(table_id))
+    monkeypatch.setattr(store_module, "delete_table_extraction", lambda file_id, table_id: tables.pop(table_id, None))
     return tables
 
 
@@ -75,7 +79,7 @@ def test_create_runs_the_extraction_in_the_background_and_saves_its_rows(stubbed
     saved = client.get(f"/documents/d1/tables/{table_id}").json()
     assert saved["status"] == "done"
     assert saved["progress"] == 1.0
-    assert saved["rows"] == rows
+    assert saved["rows"] == [{**rows[0], "id": "0"}], "each saved row gets an id to delete it by"
     assert saved["columns"] == COLUMNS
 
 
@@ -226,3 +230,79 @@ def test_progress_records_how_many_chunks_are_done(stubbed, monkeypatch):
     assert (mid_run["chunks_done"], mid_run["chunks_total"]) == (1, 1), "the count is visible while the run goes"
     saved = client.get(f"/documents/d1/tables/{table_id}").json()
     assert (saved["chunks_done"], saved["chunks_total"]) == (1, 1), "a finished run reads every chunk"
+
+
+def citation(chunk_id: str, pages: list[int]) -> dict:
+    return {"n": 1, "chunk_id": chunk_id, "pages": pages, "headings": [], "source": "table", "text": "t"}
+
+
+@pytest.fixture
+def finished(stubbed):
+    """A finished Table Extraction with three rows, one of them citing two chunks."""
+    stubbed["e1"] = {
+        "id": "e1", "request": "Setiap kewajiban", "status": "done", "progress": 1.0, "error": None,
+        "created_at": 1, "updated_at": 1,
+        "columns": [{"name": "Kewajiban", "description": ""}, {"name": "Tenggat", "description": ""}],
+        "rows": [
+            {"id": "0", "values": {"Kewajiban": "bayar", "Tenggat": "31 Jan"}, "citations": [citation("f:0", [3]), citation("f:4", [9, 3])]},
+            {"id": "1", "values": {"Kewajiban": "salah", "Tenggat": ""}, "citations": [citation("f:1", [4])]},
+            {"id": "2", "values": {"Kewajiban": "lapor", "Tenggat": "10 Mei"}, "citations": [citation("f:2", [])]},
+        ],
+    }
+    return stubbed
+
+
+def test_a_deleted_row_stays_deleted_when_the_table_is_reopened(finished):
+    assert client.delete("/documents/d1/tables/e1/rows/1").status_code == 204
+
+    reopened = client.get("/documents/d1/tables/e1").json()
+    assert [r["values"]["Kewajiban"] for r in reopened["rows"]] == ["bayar", "lapor"]
+    # Ids are not positions: after row 1 is gone, "2" still names the same row
+    assert client.delete("/documents/d1/tables/e1/rows/2").status_code == 204
+    assert [r["id"] for r in client.get("/documents/d1/tables/e1").json()["rows"]] == ["0"]
+
+
+def test_deleting_an_unknown_row_is_404(finished):
+    assert client.delete("/documents/d1/tables/e1/rows/99").status_code == 404
+    assert client.delete("/documents/d1/tables/nope/rows/0").status_code == 404
+
+
+def test_rows_cannot_be_deleted_while_the_run_is_still_writing_them(finished):
+    finished["e1"]["status"] = "running"
+    assert client.delete("/documents/d1/tables/e1/rows/0").status_code == 409
+
+
+def test_a_table_extraction_is_deleted_with_its_rows(finished):
+    assert client.delete("/documents/d1/tables/e1").status_code == 204
+    assert client.get("/documents/d1/tables/e1").status_code == 404
+    assert client.delete("/documents/d1/tables/e1").status_code == 404
+
+
+def test_the_xlsx_holds_every_column_every_remaining_row_and_its_pages(finished):
+    client.delete("/documents/d1/tables/e1/rows/1")
+
+    response = client.get("/documents/d1/tables/e1/export.xlsx")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert 'filename="Setiap kewajiban.xlsx"' in response.headers["content-disposition"]
+    sheet = openpyxl.load_workbook(io.BytesIO(response.content)).active
+    assert [[cell.value for cell in r] for r in sheet.iter_rows()] == [
+        ["Kewajiban", "Tenggat", "Pages"],
+        ["bayar", "31 Jan", "3, 9"],   # both citations' pages, once each, in order
+        ["lapor", "10 Mei", None],     # no pages known: an empty cell, not "None"
+    ]
+
+
+def test_only_a_finished_table_extraction_can_be_exported(finished):
+    finished["e1"]["status"] = "running"
+    assert client.get("/documents/d1/tables/e1/export.xlsx").status_code == 409
+
+
+def test_a_request_in_any_script_still_exports_under_a_safe_filename(finished):
+    finished["e1"]["request"] = "Kewajiban 義務 “penting”"
+
+    response = client.get("/documents/d1/tables/e1/export.xlsx")
+
+    assert response.status_code == 200
+    assert 'filename="Kewajiban penting.xlsx"' in response.headers["content-disposition"]

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, DataTable, ProgressBar } from '../design-system';
+import { ConfirmDialog } from './ConfirmDialog';
 import { ErrorDetail } from './ErrorDetail';
 import { SourcePanel } from './SourcePanel';
 import { Toast } from './Toast';
@@ -30,6 +31,7 @@ export function TablePanel({ docId }: { docId: string }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ key: string; citation: Citation } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const listQuery = useQuery({ queryKey: ['tables', docId], queryFn: () => api.listTables(docId) });
   // A run outlives this tab, so the open extraction is polled from the server rather than kept in
@@ -67,6 +69,26 @@ export function TablePanel({ docId }: { docId: string }) {
   const cancelMutation = useMutation({
     mutationFn: (tableId: string) => api.cancelTable(docId, tableId),
     onSuccess: (cancelled) => queryClient.setQueryData(['table', docId, cancelled.id], cancelled),
+    onError: fail,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (tableId: string) => api.deleteTable(docId, tableId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tables', docId] });
+      setConfirmDelete(false);
+      reset();
+    },
+    onError: (error: unknown) => {
+      setConfirmDelete(false);
+      fail(error);
+    },
+  });
+
+  const deleteRowMutation = useMutation({
+    mutationFn: ({ tableId, rowId }: { tableId: string; rowId: string }) => api.deleteTableRow(docId, tableId, rowId),
+    // Refetch rather than patch the cache: the server's list is the one that persists
+    onSuccess: (_, { tableId }) => queryClient.invalidateQueries({ queryKey: ['table', docId, tableId] }),
     onError: fail,
   });
 
@@ -110,6 +132,9 @@ export function TablePanel({ docId }: { docId: string }) {
               onNew={reset}
               onCancel={() => cancelMutation.mutate(open.id)}
               cancelling={cancelMutation.isPending}
+              onDelete={() => setConfirmDelete(true)}
+              onDeleteRow={(rowId) => deleteRowMutation.mutate({ tableId: open.id, rowId })}
+              exportUrl={api.tableExportUrl(docId, open.id)}
             />
           ) : (
             <>
@@ -184,6 +209,16 @@ export function TablePanel({ docId }: { docId: string }) {
       </div>
 
       {selected && <SourcePanel citation={selected.citation} onClose={() => setSelected(null)} />}
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title={t.tableDeleteConfirmTitle}
+        body={open ? t.tableDeleteConfirmBody(open.request) : ''}
+        danger
+        onConfirm={() => open && deleteMutation.mutate(open.id)}
+        onCancel={() => setConfirmDelete(false)}
+      />
+
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
     </div>
   );
@@ -313,6 +348,9 @@ interface ExtractionViewProps {
   onNew: () => void;
   onCancel: () => void;
   cancelling: boolean;
+  onDelete: () => void;
+  onDeleteRow: (rowId: string) => void;
+  exportUrl: string;
 }
 
 function ExtractionView({
@@ -323,6 +361,9 @@ function ExtractionView({
   onNew,
   onCancel,
   cancelling,
+  onDelete,
+  onDeleteRow,
+  exportUrl,
 }: ExtractionViewProps) {
   const { t } = useLang();
   const names = extraction.columns.map((c) => c.name);
@@ -333,9 +374,19 @@ function ExtractionView({
         <h3 style={{ margin: 0, fontSize: 'var(--fs-ui-sm)', fontWeight: 'var(--fw-semibold)', color: 'var(--text-title)' }}>
           {extraction.request}
         </h3>
-        <button className="quiet-button" onClick={onNew}>
-          {t.tableNewAction}
-        </button>
+        <div style={{ display: 'flex', flex: '0 0 auto', alignItems: 'center', gap: 4 }}>
+          {extraction.status === 'done' && extraction.rows.length > 0 && (
+            <a className="quiet-button" style={{ textDecoration: 'none' }} href={exportUrl} download>
+              {t.tableExportAction}
+            </a>
+          )}
+          <button className="quiet-button" data-tone="danger" onClick={onDelete}>
+            {t.tableDeleteAction}
+          </button>
+          <button className="quiet-button" onClick={onNew}>
+            {t.tableNewAction}
+          </button>
+        </div>
       </div>
 
       {isRunning(extraction) && <RunProgress extraction={extraction} onCancel={onCancel} cancelling={cancelling} />}
@@ -378,7 +429,7 @@ function ExtractionView({
                 // otherwise collide with the citations column.
                 ...Object.fromEntries(names.map((name, index) => [`c${index}`, row.values[name] ?? ''])),
                 sources: (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
                     {row.citations.map((citation) => {
                       const key = `${extraction.id}:${rowIndex}:${citation.chunk_id}`;
                       return (
@@ -394,6 +445,15 @@ function ExtractionView({
                         </button>
                       );
                     })}
+                    <button
+                      className="quiet-button"
+                      data-tone="danger"
+                      aria-label={t.tableRowDelete}
+                      title={t.tableRowDelete}
+                      onClick={() => onDeleteRow(row.id)}
+                    >
+                      ×
+                    </button>
                   </div>
                 ),
               }))}

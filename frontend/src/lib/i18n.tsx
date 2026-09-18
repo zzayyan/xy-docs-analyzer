@@ -123,6 +123,11 @@ export interface Dict {
   tableStatusCancelled: string;
   tableCancelAction: string;
   tableCancelledNotice: string;
+  tableExportAction: string;
+  tableDeleteAction: string;
+  tableDeleteConfirmTitle: string;
+  tableDeleteConfirmBody: (request: string) => string;
+  tableRowDelete: string;
 }
 
 const en: Dict = {
@@ -246,6 +251,11 @@ const en: Dict = {
   tableStatusCancelled: 'Stopped',
   tableCancelAction: 'Stop',
   tableCancelledNotice: 'You stopped this run, so it has no rows. Its columns are kept.',
+  tableExportAction: 'Export XLSX',
+  tableDeleteAction: 'Delete table',
+  tableDeleteConfirmTitle: 'Delete this table extraction?',
+  tableDeleteConfirmBody: (request) => `"${request}" and all of its rows will be deleted. This cannot be undone.`,
+  tableRowDelete: 'Delete row',
 };
 
 const id: Dict = {
@@ -369,6 +379,11 @@ const id: Dict = {
   tableStatusCancelled: 'Dihentikan',
   tableCancelAction: 'Hentikan',
   tableCancelledNotice: 'Run ini Anda hentikan, jadi tidak ada baris. Kolomnya tetap disimpan.',
+  tableExportAction: 'Ekspor XLSX',
+  tableDeleteAction: 'Hapus tabel',
+  tableDeleteConfirmTitle: 'Hapus ekstraksi tabel ini?',
+  tableDeleteConfirmBody: (request) => `"${request}" beserta semua barisnya akan dihapus. Tindakan ini tidak bisa dibatalkan.`,
+  tableRowDelete: 'Hapus baris',
 };
 
 const dictionaries = { en, id } as const;
