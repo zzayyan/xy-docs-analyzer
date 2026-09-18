@@ -16,7 +16,7 @@ from app.config import settings
 from app.graph import to_citations, workflow
 from app.ingest.convert import page_count
 from app.ingest.pipeline import create_file, ingest, set_status
-from app.table import Column, document_context, propose_columns, suggest_tables
+from app.table import Column, Stopped, document_context, propose_columns, suggest_tables
 from app.table import run as run_table
 
 READ_CHUNK = 1024 * 1024
@@ -87,6 +87,7 @@ class ProposedColumns(BaseModel):
 
 class SuggestedTable(BaseModel):
     title: str
+    request: str
     columns: list[Column]
 
 
@@ -148,6 +149,8 @@ class TableExtraction(BaseModel):
     status: str
     progress: float
     error: str | None = None
+    chunks_done: int | None = None
+    chunks_total: int | None = None
     created_at: int
     updated_at: int
 
@@ -282,16 +285,31 @@ def extract_table(doc_id: str, table_id: str, columns: list[dict], model: str | 
 
     Like ingest, this occupies one of Starlette's sync worker threads for the whole run, and nothing
     caps how many runs a document can have in flight at once."""
+    def progress(done: int, total: int) -> None:
+        store.set_table_extraction(table_id, progress=round(done / total, 3), chunks_done=done, chunks_total=total)
+
+    def cancelled() -> bool:
+        extraction = store.get_table_extraction(doc_id, table_id)
+        # A deleted document is a cancelled run too: there is nothing left to write the rows to
+        return extraction is None or extraction["status"] == "cancelled"
+
     try:
-        store.set_table_extraction(table_id, status="running")
-        rows = run_table(
-            store.list_chunks(doc_id), columns, model,
-            on_progress=lambda done, total: store.set_table_extraction(table_id, progress=round(done / total, 3)),
+        chunks = store.list_chunks(doc_id)
+        store.set_table_extraction(table_id, status="running", chunks_done=0, chunks_total=len(chunks))
+        rows = run_table(chunks, columns, model, on_progress=progress, should_stop=cancelled)
+        store.set_table_extraction(
+            table_id, status="done", progress=1.0, rows=rows,
+            chunks_done=len(chunks), chunks_total=len(chunks),
         )
-        store.set_table_extraction(table_id, status="done", progress=1.0, rows=rows)
+    except Stopped:
+        # The user asked for this, so it is not an error and keeps no half-done rows
+        store.set_table_extraction(table_id, status="cancelled")
     except Exception as exc:
         # The columns are left untouched, so the user can retry the same table without redefining it
         store.set_table_extraction(table_id, status="error", error=str(exc))
+
+
+IN_FLIGHT = ("queued", "running")
 
 
 def checked_columns(columns: list[Column]) -> list[dict]:
@@ -339,6 +357,10 @@ def suggest_document_tables(doc_id: str) -> dict:
 def create_table_extraction(doc_id: str, body: TableRequest, background: BackgroundTasks) -> dict:
     file = ready_document(doc_id)
     columns = checked_columns(body.columns)
+    # One run at a time per document: each one holds a worker thread for minutes and hammers the same
+    # model, and a user who clicks twice means "start it", not "start it twice".
+    if any(e["status"] in IN_FLIGHT for e in store.list_table_extractions(doc_id)):
+        raise HTTPException(status_code=409, detail="a table extraction is already running for this document")
     extraction = store.create_table_extraction(doc_id, body.request, columns)
     background.add_task(extract_table, doc_id, extraction["id"], columns, file.get("llm_model"))
     return extraction
@@ -357,6 +379,16 @@ def document_table_extraction(doc_id: str, table_id: str) -> dict:
     if extraction is None:
         raise HTTPException(status_code=404, detail="table extraction not found")
     return extraction
+
+
+@app.post("/documents/{doc_id}/tables/{table_id}/cancel", response_model=TableExtraction)
+def cancel_table_extraction(doc_id: str, table_id: str) -> dict:
+    """Marks the run cancelled; the background task notices between chunks and stops there."""
+    extraction = document_table_extraction(doc_id, table_id)
+    if extraction["status"] not in IN_FLIGHT:
+        raise HTTPException(status_code=409, detail=f"table extraction is already {extraction['status']}")
+    store.set_table_extraction(table_id, status="cancelled")
+    return {**extraction, "status": "cancelled"}
 
 
 @app.get("/documents/{doc_id}/turns", response_model=list[Turn])

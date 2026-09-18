@@ -152,13 +152,17 @@ def test_suggest_tables_returns_candidate_tables_with_their_columns(monkeypatch)
         def invoke(self, messages):
             seen["messages"] = messages
             return table.SuggestedTables(tables=[
-                table.SuggestedTable(title="Kewajiban", columns=[table.Column(name="Pasal", description="Nomor pasal")]),
+                table.SuggestedTable(
+                    title="Kewajiban", request="Setiap kewajiban dan pasalnya",
+                    columns=[table.Column(name="Pasal", description="Nomor pasal")],
+                ),
             ])
 
     monkeypatch.setattr(table, "llm", lambda model=None: FakeModel())
 
     assert table.suggest_tables("Outline:\n- Bab I", model=None) == [
-        {"title": "Kewajiban", "columns": [{"name": "Pasal", "description": "Nomor pasal"}]},
+        {"title": "Kewajiban", "request": "Setiap kewajiban dan pasalnya",
+         "columns": [{"name": "Pasal", "description": "Nomor pasal"}]},
     ]
     assert "Bab I" in "\n".join(text for _, text in seen["messages"])
 
@@ -212,3 +216,41 @@ def test_a_chunk_that_fails_twice_still_fails_the_run(monkeypatch):
 
     with pytest.raises(ValueError, match="length limit"):
         table.extract_one("text", COLUMNS, None)
+
+
+def test_a_cancelled_run_stops_reading_chunks_instead_of_finishing_the_document(monkeypatch, chunks):
+    read: list[str] = []
+
+    def slow_extract(text, columns, model):
+        read.append(text)
+        time.sleep(0.1)
+        return fake_rows([["item", "2027"]])
+
+    monkeypatch.setattr(settings, "llm_concurrency", 2)
+    monkeypatch.setattr(table, "extract_one", slow_extract)
+    ticks = []
+
+    with pytest.raises(table.Stopped):
+        table.run(chunks, COLUMNS, model=None, should_stop=lambda: len(ticks) >= 2 or ticks.append(1))
+
+    assert len(read) < len(chunks), f"every one of the {len(chunks)} chunks was read anyway"
+
+
+def test_a_failed_run_drops_the_chunks_it_had_not_started(monkeypatch):
+    many = [{"id": f"f:{i}", "text": f"text {i}", "pages": [i], "headings": []} for i in range(12)]
+    read: list[str] = []
+
+    def boom(text, columns, model):
+        read.append(text)
+        time.sleep(0.1)
+        if text.endswith(" 1"):
+            raise RuntimeError("model refused")
+        return fake_rows([["item", "2027"]])
+
+    monkeypatch.setattr(settings, "llm_concurrency", 2)
+    monkeypatch.setattr(table, "extract_one", boom)
+
+    with pytest.raises(RuntimeError, match="model refused"):
+        table.run(many, COLUMNS, model=None)
+
+    assert len(read) < len(many), "a failed run paid for the whole document"

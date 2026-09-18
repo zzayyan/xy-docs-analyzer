@@ -120,6 +120,9 @@ export interface Dict {
   tableStatusRunning: string;
   tableStatusDone: string;
   tableStatusError: string;
+  tableStatusCancelled: string;
+  tableCancelAction: string;
+  tableCancelledNotice: string;
 }
 
 const en: Dict = {
@@ -240,6 +243,9 @@ const en: Dict = {
   tableStatusRunning: 'Running',
   tableStatusDone: 'Done',
   tableStatusError: 'Failed',
+  tableStatusCancelled: 'Stopped',
+  tableCancelAction: 'Stop',
+  tableCancelledNotice: 'You stopped this run, so it has no rows. Its columns are kept.',
 };
 
 const id: Dict = {
@@ -360,6 +366,9 @@ const id: Dict = {
   tableStatusRunning: 'Berjalan',
   tableStatusDone: 'Selesai',
   tableStatusError: 'Gagal',
+  tableStatusCancelled: 'Dihentikan',
+  tableCancelAction: 'Hentikan',
+  tableCancelledNotice: 'Run ini Anda hentikan, jadi tidak ada baris. Kolomnya tetap disimpan.',
 };
 
 const dictionaries = { en, id } as const;

@@ -5,7 +5,7 @@ import { ErrorDetail } from './ErrorDetail';
 import { SourcePanel } from './SourcePanel';
 import { Toast } from './Toast';
 import { api, ApiError, type Citation, type Column, type SuggestedTable, type TableExtraction } from '../lib/api';
-import { formatRelative } from '../lib/format';
+import { estimateRemaining, formatDuration, formatRelative } from '../lib/format';
 import { useLang, type Lang } from '../lib/i18n';
 
 const STATUS_KEY = {
@@ -13,6 +13,7 @@ const STATUS_KEY = {
   running: 'tableStatusRunning',
   done: 'tableStatusDone',
   error: 'tableStatusError',
+  cancelled: 'tableStatusCancelled',
 } as const;
 
 function isRunning(extraction: TableExtraction): boolean {
@@ -63,12 +64,18 @@ export function TablePanel({ docId }: { docId: string }) {
     onError: fail,
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: (tableId: string) => api.cancelTable(docId, tableId),
+    onSuccess: (cancelled) => queryClient.setQueryData(['table', docId, cancelled.id], cancelled),
+    onError: fail,
+  });
+
   const open = openId !== null ? openQuery.data ?? null : null;
   // The history list carries each run's status and is fetched once, so when the polled run reaches a
   // terminal status, refresh the list that still shows it as running.
   const openStatus = open?.status ?? null;
   useEffect(() => {
-    if (openStatus === 'done' || openStatus === 'error') {
+    if (openStatus === 'done' || openStatus === 'error' || openStatus === 'cancelled') {
       queryClient.invalidateQueries({ queryKey: ['tables', docId] });
     }
   }, [openStatus, docId, queryClient]);
@@ -101,6 +108,8 @@ export function TablePanel({ docId }: { docId: string }) {
               onSelect={select}
               onStartOver={() => startOver(open)}
               onNew={reset}
+              onCancel={() => cancelMutation.mutate(open.id)}
+              cancelling={cancelMutation.isPending}
             />
           ) : (
             <>
@@ -143,7 +152,7 @@ export function TablePanel({ docId }: { docId: string }) {
                 <Suggestions
                   tables={suggestMutation.data.tables}
                   onPick={(suggestion) => {
-                    setRequest(suggestion.title);
+                    setRequest(suggestion.request);
                     setColumns(suggestion.columns);
                     suggestMutation.reset();
                   }}
@@ -256,15 +265,65 @@ function ColumnEditor({ columns, onChange, onRun, running }: ColumnEditorProps) 
   );
 }
 
+/** How far a run has got: the chunk count it reads, plus elapsed and estimated remaining time, the
+ * same shape ingest shows — a run is minutes long, so a bare percentage says too little. */
+function RunProgress({
+  extraction,
+  onCancel,
+  cancelling,
+}: {
+  extraction: TableExtraction;
+  onCancel: () => void;
+  cancelling: boolean;
+}) {
+  const { t } = useLang();
+  const elapsedMs = Date.now() - extraction.created_at;
+  const remainingMs = estimateRemaining(elapsedMs, extraction.progress);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
+        <span style={{ color: 'var(--text-title)' }}>{t.tableRunningTitle}</span>
+        <button className="quiet-button" data-tone="danger" onClick={onCancel} disabled={cancelling}>
+          {t.tableCancelAction}
+        </button>
+      </div>
+      <ProgressBar value={extraction.progress * 100} />
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-4)', fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>
+        {extraction.chunks_total !== null && (
+          <span>
+            {t.docStepCount(extraction.chunks_done ?? 0, extraction.chunks_total)} {t.unitChunks}
+          </span>
+        )}
+        <span>
+          {t.docElapsedLabel}: {formatDuration(elapsedMs)}
+        </span>
+        {remainingMs !== undefined && <span>{t.docEtaLabel(formatDuration(remainingMs))}</span>}
+      </div>
+      <span style={{ fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>{t.tableRunningHint}</span>
+    </div>
+  );
+}
+
 interface ExtractionViewProps {
   extraction: TableExtraction;
   selectedKey: string | null;
   onSelect: (key: string, citation: Citation) => void;
   onStartOver: () => void;
   onNew: () => void;
+  onCancel: () => void;
+  cancelling: boolean;
 }
 
-function ExtractionView({ extraction, selectedKey, onSelect, onStartOver, onNew }: ExtractionViewProps) {
+function ExtractionView({
+  extraction,
+  selectedKey,
+  onSelect,
+  onStartOver,
+  onNew,
+  onCancel,
+  cancelling,
+}: ExtractionViewProps) {
   const { t } = useLang();
   const names = extraction.columns.map((c) => c.name);
 
@@ -279,13 +338,14 @@ function ExtractionView({ extraction, selectedKey, onSelect, onStartOver, onNew 
         </button>
       </div>
 
-      {isRunning(extraction) && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ color: 'var(--text-title)' }}>{t.tableRunningTitle}</span>
-          <ProgressBar value={extraction.progress * 100} />
-          <span style={{ fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>
-            {t.tableProgress(Math.round(extraction.progress * 100))} · {t.tableRunningHint}
-          </span>
+      {isRunning(extraction) && <RunProgress extraction={extraction} onCancel={onCancel} cancelling={cancelling} />}
+
+      {extraction.status === 'cancelled' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', alignItems: 'flex-start' }}>
+          <p style={{ margin: 0, color: 'var(--text-muted)' }}>{t.tableCancelledNotice}</p>
+          <button className="quiet-button" onClick={onStartOver}>
+            {t.tableRetry}
+          </button>
         </div>
       )}
 

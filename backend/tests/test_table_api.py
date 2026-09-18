@@ -63,7 +63,7 @@ def test_create_runs_the_extraction_in_the_background_and_saves_its_rows(stubbed
     rows = [{"values": {"Kewajiban": "bayar"}, "citations": [
         {"n": 1, "chunk_id": "f:0", "pages": [1], "headings": [], "source": "table", "text": "text"},
     ]}]
-    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress: rows)
+    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop: rows)
 
     # TestClient runs background tasks before returning, so the run is finished here
     response = client.post("/documents/d1/tables", json={"request": "setiap kewajiban", "columns": COLUMNS})
@@ -80,7 +80,7 @@ def test_create_runs_the_extraction_in_the_background_and_saves_its_rows(stubbed
 
 
 def test_a_failed_run_is_stored_with_its_error_and_keeps_its_columns(stubbed, monkeypatch):
-    def boom(chunks, columns, model, on_progress):
+    def boom(chunks, columns, model, on_progress, should_stop):
         raise RuntimeError("model refused")
 
     monkeypatch.setattr(api_module, "run_table", boom)
@@ -103,7 +103,7 @@ def test_create_is_409_while_the_document_is_still_ingesting(stubbed, monkeypatc
 
 
 def test_list_returns_the_documents_table_extractions(stubbed, monkeypatch):
-    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress: [])
+    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop: [])
     client.post("/documents/d1/tables", json={"request": "setiap kewajiban", "columns": COLUMNS})
 
     listed = client.get("/documents/d1/tables").json()
@@ -143,7 +143,7 @@ def test_propose_sends_the_documents_own_context_to_the_model(stubbed, monkeypat
 
 
 def test_suggest_returns_candidate_tables_from_the_document_alone(stubbed, monkeypatch):
-    suggestions = [{"title": "Kewajiban", "columns": COLUMNS}]
+    suggestions = [{"title": "Kewajiban", "request": "Setiap kewajiban", "columns": COLUMNS}]
     monkeypatch.setattr(store_module, "list_sections", lambda file_id: [])
     monkeypatch.setattr(api_module, "suggest_tables", lambda context, model: suggestions)
 
@@ -168,3 +168,61 @@ def test_propose_is_409_while_the_document_is_still_ingesting(stubbed, monkeypat
     # Chunks are what the proposal reads; mid-ingest there is nothing to read yet
     monkeypatch.setattr(store_module, "get_file", lambda doc_id: fake_document(doc_id, status="embedding"))
     assert client.post("/documents/d1/tables/propose", json={"request": "q"}).status_code == 409
+
+
+def test_a_second_run_is_refused_while_one_is_still_in_flight(stubbed, monkeypatch):
+    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop: [])
+    first = client.post("/documents/d1/tables", json={"request": "q", "columns": COLUMNS})
+    assert first.status_code == 200
+
+    # The finished first run is not in flight, so it must not block a second one
+    assert client.post("/documents/d1/tables", json={"request": "q", "columns": COLUMNS}).status_code == 200
+
+    stubbed["e1"]["status"] = "running"
+    blocked = client.post("/documents/d1/tables", json={"request": "q", "columns": COLUMNS})
+    assert blocked.status_code == 409
+    assert "already" in blocked.json()["detail"]
+
+
+def test_cancelling_a_run_stops_it_and_records_that_the_user_stopped_it(stubbed, monkeypatch):
+    stopped = []
+
+    def slow_run(chunks, columns, model, on_progress, should_stop):
+        # The run asks between chunks; the endpoint has already marked it cancelled by then
+        stopped.append(should_stop())
+        raise table_module.Stopped()
+
+    monkeypatch.setattr(api_module, "run_table", slow_run)
+    created = client.post("/documents/d1/tables", json={"request": "q", "columns": COLUMNS}).json()
+
+    saved = client.get(f"/documents/d1/tables/{created['id']}").json()
+    assert saved["status"] == "cancelled"
+    assert saved["error"] is None, "a cancelled run is not a failed run"
+
+
+def test_cancel_marks_a_running_extraction_and_is_refused_once_it_has_finished(stubbed, monkeypatch):
+    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop: [])
+    table_id = client.post("/documents/d1/tables", json={"request": "q", "columns": COLUMNS}).json()["id"]
+
+    assert client.post(f"/documents/d1/tables/{table_id}/cancel").status_code == 409, "the run already finished"
+
+    stubbed[table_id]["status"] = "running"
+    assert client.post(f"/documents/d1/tables/{table_id}/cancel").status_code == 200
+    assert stubbed[table_id]["status"] == "cancelled"
+    assert client.post("/documents/d1/tables/nope/cancel").status_code == 404
+
+
+def test_progress_records_how_many_chunks_are_done(stubbed, monkeypatch):
+    mid_run = {}
+
+    def run_with_progress(chunks, columns, model, on_progress, should_stop):
+        on_progress(1, len(chunks))
+        mid_run.update(stubbed["e1"])
+        return []
+
+    monkeypatch.setattr(api_module, "run_table", run_with_progress)
+    table_id = client.post("/documents/d1/tables", json={"request": "q", "columns": COLUMNS}).json()["id"]
+
+    assert (mid_run["chunks_done"], mid_run["chunks_total"]) == (1, 1), "the count is visible while the run goes"
+    saved = client.get(f"/documents/d1/tables/{table_id}").json()
+    assert (saved["chunks_done"], saved["chunks_total"]) == (1, 1), "a finished run reads every chunk"

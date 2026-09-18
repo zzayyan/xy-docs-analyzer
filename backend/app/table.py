@@ -10,9 +10,6 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.models import llm
 
-# How much of the document is shown when proposing columns: enough to pick up its own wording,
-# small enough to prepend to a single call. Sections come from the outline, so only long documents
-# have them; the opening chunks are what a short document has instead.
 # A chunk is at most CHUNK_MAX_TOKENS long, so its rows cannot honestly need more output than this.
 # The cap is what makes a runaway cost seconds instead of minutes (measured: 7s against 110s).
 EXTRACT_MAX_TOKENS = 3000
@@ -20,6 +17,9 @@ EXTRACT_MAX_TOKENS = 3000
 # where one chunk ran to 15968 tokens of repeated rows every time, and read cleanly off-greedy.
 RETRY_TEMPERATURE = 0.3
 
+# How much of the document is shown when proposing columns: enough to pick up its own wording,
+# small enough to prepend to a single call. Sections come from the outline, so only long documents
+# have them; the opening chunks are what a short document has instead.
 CONTEXT_SECTIONS = 40
 CONTEXT_SECTION_CHARS = 80
 CONTEXT_CHUNKS = 5
@@ -36,9 +36,9 @@ PROPOSE_SYSTEM = (
 SUGGEST_SYSTEM = (
     "You propose tables worth pulling out of a document, from an outline and a few passages of it. "
     "Give three tables: things the document lists over and over -- obligations, parties, dates, "
-    "amounts, articles -- not a summary of it. Each table has a short title and between two and six "
-    "columns, each column with a short name and a one-sentence description. Title and name them in "
-    "the language of the document."
+    "amounts, articles -- not a summary of it. Each table has a short title, one plain sentence "
+    "asking for what it collects, and between two and six columns, each column with a short name and "
+    "a one-sentence description. Write all of it in the language of the document."
 )
 
 EXTRACT_SYSTEM = (
@@ -48,6 +48,10 @@ EXTRACT_SYSTEM = (
     "language of the passage -- do not translate, summarise or infer. Leave a value empty when the "
     "passage does not state it."
 )
+
+
+class Stopped(Exception):
+    """Raised when a run is cancelled mid-way: an outcome the user asked for, not a failure."""
 
 
 class Column(BaseModel):
@@ -61,6 +65,7 @@ class ProposedColumns(BaseModel):
 
 class SuggestedTable(BaseModel):
     title: str = Field(description="Short title for this table")
+    request: str = Field(description="What to pull out of the document, in one plain sentence")
     columns: list[Column]
 
 
@@ -130,20 +135,26 @@ def extract_one(text: str, columns: list[dict], model: str | None) -> ChunkRows:
 def run(
     chunks: list[dict], columns: list[dict], model: str | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> list[dict]:
     """Read every chunk and return the rows found, each citing the chunk it came from.
 
     Rows keep chunk order, and a chunk the model fails on fails the whole run: a partial table would
-    silently claim to cover the whole document. Chunks already submitted when one fails still finish,
-    since the pool is drained on exit -- a failed run costs a whole document's worth of calls. Merging
-    items found in more than one chunk is a separate ticket, so one item mentioned twice is still two
-    rows here."""
+    silently claim to cover the whole document. should_stop is asked before each chunk's rows are
+    taken, and raises Stopped -- that is how a user cancels a run that has minutes left. Merging items
+    found in more than one chunk is a separate ticket, so one item mentioned twice is still two rows
+    here."""
     rows: list[dict] = []
-    # One HTTP call per chunk, so it parallelises; map() keeps chunk order however the calls interleave.
+    # One HTTP call per chunk, so it parallelises; map() keeps chunk order however the calls
+    # interleave. Closing its iterator (on Stopped, or on a chunk the model failed twice on) cancels
+    # every chunk not yet started, so neither cancelling nor failing pays for the rest of the document.
     with ThreadPoolExecutor(max_workers=settings.llm_concurrency) as pool:
         extracted = pool.map(lambda chunk: extract_one(chunk["text"], columns, model), chunks)
 
         for done, (chunk, found) in enumerate(zip(chunks, extracted), start=1):
+            if should_stop and should_stop():
+                extracted.close()
+                raise Stopped()
             citation = {
                 "n": 1, "chunk_id": chunk["id"], "pages": chunk["pages"],
                 "headings": chunk.get("headings") or [], "source": "table", "text": chunk["text"],

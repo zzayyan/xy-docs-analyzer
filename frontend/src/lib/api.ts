@@ -98,10 +98,11 @@ export interface Row {
 
 export interface SuggestedTable {
   title: string;
+  request: string;
   columns: Column[];
 }
 
-export type TableStatus = 'queued' | 'running' | 'done' | 'error';
+export type TableStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled';
 
 export interface TableExtraction {
   id: string;
@@ -111,6 +112,8 @@ export interface TableExtraction {
   status: TableStatus;
   progress: number;
   error: string | null;
+  chunks_done: number | null;
+  chunks_total: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -189,6 +192,9 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ request: tableRequest, columns }),
     }),
+
+  cancelTable: (docId: string, tableId: string) =>
+    request<TableExtraction>(`/documents/${docId}/tables/${tableId}/cancel`, { method: 'POST' }),
 
   listTables: (docId: string) => request<TableExtraction[]>(`/documents/${docId}/tables`),
 

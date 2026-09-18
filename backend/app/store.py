@@ -66,7 +66,8 @@ SET_TABLE_EXTRACTION = "MATCH (e:TableExtraction {id: $id}) SET e += $props, e.u
 # thousands of chunk quotes each. Open one to get its rows, through GET_TABLE_EXTRACTION.
 LIST_TABLE_EXTRACTIONS = """
 MATCH (e:TableExtraction {file_id: $file_id})
-RETURN e {.id, .request, .columns, .status, .progress, .error, .created_at, .updated_at} AS extraction
+RETURN e {.id, .request, .columns, .status, .progress, .error, .chunks_done, .chunks_total,
+          .created_at, .updated_at} AS extraction
 ORDER BY e.created_at DESC
 """
 
