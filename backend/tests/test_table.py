@@ -8,10 +8,20 @@ import pytest
 import app.table as table
 from app.config import settings
 
+# Kept before the autouse fixture below replaces it, for the one test that is about the call itself
+real_find_duplicates = table.find_duplicates
+
 COLUMNS = [
     {"name": "Kewajiban", "description": "The obligation as written"},
     {"name": "Tenggat", "description": "Its deadline"},
 ]
+
+
+@pytest.fixture(autouse=True)
+def no_duplicates(monkeypatch):
+    """The merge pass is one more model call; tests that are not about merging find no duplicates, so
+    they never reach a real model. Merge tests replace this with their own answer."""
+    monkeypatch.setattr(table, "find_duplicates", lambda rows, columns, model: [])
 
 
 @pytest.fixture
@@ -254,3 +264,138 @@ def test_a_failed_run_drops_the_chunks_it_had_not_started(monkeypatch):
         table.run(many, COLUMNS, model=None)
 
     assert len(read) < len(many), "a failed run paid for the whole document"
+
+
+def cited(chunk_id: str, n: int = 1) -> dict:
+    return {"n": n, "chunk_id": chunk_id, "pages": [1], "headings": [], "source": "table", "text": chunk_id}
+
+
+def row(values: dict, *chunk_ids: str) -> dict:
+    return {"values": values, "citations": [cited(c) for c in chunk_ids]}
+
+
+def test_an_item_found_in_several_chunks_becomes_one_row_citing_every_chunk(monkeypatch, chunks):
+    # The same obligation is found in chunks 0 and 2; chunk 1 holds a different one
+    found = {"text 0": [["bayar", ""]], "text 1": [["lapor", "10 Mei"]], "text 2": [["bayar", "31 Jan"]]}
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model: fake_rows(found[text]))
+    monkeypatch.setattr(table, "find_duplicates", lambda rows, columns, model: [[0, 2]])
+
+    rows = table.run(chunks[:3], COLUMNS, model=None)
+
+    assert [r["values"] for r in rows] == [
+        {"Kewajiban": "bayar", "Tenggat": "31 Jan"},  # the empty deadline is filled from its duplicate
+        {"Kewajiban": "lapor", "Tenggat": "10 Mei"},
+    ]
+    assert [c["chunk_id"] for c in rows[0]["citations"]] == ["f:0", "f:2"]
+    assert [c["n"] for c in rows[0]["citations"]] == [1, 2], "a merged row numbers its citations like chat"
+
+
+def test_distinct_items_are_not_merged(monkeypatch, chunks):
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model: fake_rows([[text, ""]]))
+
+    rows = table.run(chunks[:3], COLUMNS, model=None)
+
+    assert len(rows) == 3
+
+
+def test_merge_ignores_numbers_that_are_out_of_range_repeated_or_already_grouped():
+    # Identical values, so this is only about which numbers are honoured, not about contradictions
+    rows = [row({"Kewajiban": "bayar"}, f"f:{i}") for i in range(4)]
+
+    merged = table.merge_rows(rows, [[0, 1, 1, 99], [1, 2], [3]])
+
+    # [1, 2] loses 1 to the first group, which leaves a group of one: nothing to merge
+    assert [[c["chunk_id"] for c in r["citations"]] for r in merged] == [["f:0", "f:1"], ["f:2"], ["f:3"]]
+
+
+def test_a_merged_row_cites_a_chunk_once_even_if_both_duplicates_came_from_it():
+    rows = [row({"Kewajiban": "a"}, "f:0"), row({"Kewajiban": "a"}, "f:0", "f:1")]
+
+    [merged] = table.merge_rows(rows, [[0, 1]])
+
+    assert [c["chunk_id"] for c in merged["citations"]] == ["f:0", "f:1"]
+
+
+def test_a_failed_merge_keeps_the_rows_unmerged_rather_than_losing_the_table(monkeypatch, chunks):
+    def boom(rows, columns, model):
+        raise RuntimeError("model refused")
+
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model: fake_rows([["item", ""]]))
+    monkeypatch.setattr(table, "find_duplicates", boom)
+
+    assert len(table.run(chunks[:3], COLUMNS, model=None)) == 3
+
+
+def test_there_is_no_merge_pass_when_there_is_nothing_to_merge(monkeypatch, chunks):
+    def must_not_run(rows, columns, model):
+        raise AssertionError("a single row cannot have a duplicate")
+
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model: fake_rows([["item", ""]]))
+    monkeypatch.setattr(table, "find_duplicates", must_not_run)
+
+    assert len(table.run(chunks[:1], COLUMNS, model=None)) == 1
+
+
+def test_find_duplicates_shows_the_model_every_row_by_number(monkeypatch):
+    seen = {}
+
+    class FakeModel:
+        def with_structured_output(self, schema):
+            return self
+
+        def invoke(self, messages):
+            seen["prompt"] = messages[-1][1]
+            return table.DuplicateGroups(groups=[[0, 1]])
+
+    monkeypatch.setattr(table, "llm", lambda model=None, **kw: FakeModel())
+    rows = [row({"Kewajiban": "bayar", "Tenggat": ""}, "f:0"), row({"Kewajiban": "bayar", "Tenggat": "31 Jan"}, "f:2")]
+
+    assert real_find_duplicates(rows, COLUMNS, None) == [[0, 1]]
+    assert "0. Kewajiban: bayar" in seen["prompt"] and "1. Kewajiban: bayar | Tenggat: 31 Jan" in seen["prompt"]
+
+
+def test_rows_the_model_groups_but_that_contradict_each_other_stay_apart():
+    # Measured on a real document: Qwen3.5-4B grouped these, and they are different parameters
+    rows = [
+        row({"Parameter": "prev_overlap", "Nilai": "satu chunk dari section tetangga"}, "f:6"),
+        row({"Parameter": "next_overlap", "Nilai": "satu chunk dari section tetangga"}, "f:6"),
+        row({"Parameter": "db", "Nilai": "Konfigurasi request"}, "f:9"),
+        row({"Parameter": "user_id", "Nilai": "Konfigurasi request"}, "f:9"),
+    ]
+
+    assert len(table.merge_rows(rows, [[0, 1], [2, 3]])) == 4
+
+
+def test_the_same_item_stated_more_fully_or_left_blank_elsewhere_still_merges():
+    rows = [
+        row({"Kewajiban": "menyediakan tenaga ahli", "Tenggat": "paling lambat 15 Februari 2027"}, "f:1"),
+        row({"Kewajiban": "Menyediakan tenaga ahli.", "Tenggat": "15 Februari 2027"}, "f:4"),
+        row({"Kewajiban": "menyediakan tenaga ahli bersertifikat", "Tenggat": ""}, "f:7"),
+    ]
+
+    [merged] = table.merge_rows(rows, [[0, 1, 2]])
+
+    assert [c["chunk_id"] for c in merged["citations"]] == ["f:1", "f:4", "f:7"]
+
+
+def test_one_contradicting_member_leaves_the_group_and_the_rest_still_merge():
+    rows = [
+        row({"Kewajiban": "laporan bulanan", "Tenggat": "tanggal 10"}, "f:0"),
+        row({"Kewajiban": "laporan bulanan", "Tenggat": "31 Maret"}, "f:3"),  # a different deadline: not the same item
+        row({"Kewajiban": "laporan bulanan", "Tenggat": ""}, "f:5"),
+    ]
+
+    merged = table.merge_rows(rows, [[0, 1, 2]])
+
+    assert [[c["chunk_id"] for c in r["citations"]] for r in merged] == [["f:0", "f:5"], ["f:3"]]
+
+
+def test_two_obligations_that_differ_by_one_word_stay_apart_even_with_no_deadline_to_tell_them_apart():
+    # "bulanan" and "tahunan" share half their words with each other; that is exactly the case a
+    # word-overlap rule cannot tell from a paraphrase, so the rule errs on keeping them apart
+    rows = [
+        row({"Kewajiban": "menyerahkan laporan bulanan", "Tenggat": ""}, "f:0"),
+        row({"Kewajiban": "menyerahkan laporan tahunan", "Tenggat": ""}, "f:3"),
+    ]
+
+    assert len(table.merge_rows(rows, [[0, 1]])) == 2

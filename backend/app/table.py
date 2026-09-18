@@ -2,6 +2,7 @@
 
 Column proposal and the per-chunk read are both structured output over the document's own model
 (prior art: app/retrieval/kg.py). Persistence lives in app/store.py, orchestration in app/api.py."""
+import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
@@ -16,6 +17,14 @@ EXTRACT_MAX_TOKENS = 3000
 # Greedy decoding (temperature 0) repeats itself forever on some passages -- measured on Qwen3.5-4B,
 # where one chunk ran to 15968 tokens of repeated rows every time, and read cleanly off-greedy.
 RETRY_TEMPERATURE = 0.3
+# The merge pass answers with row numbers only, so its output is small even for a long table.
+MERGE_MAX_TOKENS = 2000
+# Two values of one column describe the same thing when they share more than this share of their
+# words. Deliberately above one half: "menyerahkan laporan bulanan" and "menyerahkan laporan tahunan"
+# share exactly half and are different obligations, so a paraphrase that also shares only half
+# ("menyediakan" / "Disediakan tenaga ahli") is left unmerged too (see docs/adr/0002).
+SAME_VALUE_OVERLAP = 0.6
+WORD = re.compile(r"\w+")
 
 # How much of the document is shown when proposing columns: enough to pick up its own wording,
 # small enough to prepend to a single call. Sections come from the outline, so only long documents
@@ -49,6 +58,14 @@ EXTRACT_SYSTEM = (
     "passage does not state it."
 )
 
+MERGE_SYSTEM = (
+    "You are given the numbered rows of one table, each pulled out of a different passage of the same "
+    "document. Find the rows that describe the same item -- the same obligation, party, date or "
+    "amount, mentioned in more than one place -- and return them as groups of row numbers. Only group "
+    "rows that are truly one item: two similar but separate items stay apart. Leave out every row "
+    "that has no duplicate."
+)
+
 
 class Stopped(Exception):
     """Raised when a run is cancelled mid-way: an outcome the user asked for, not a failure."""
@@ -71,6 +88,10 @@ class SuggestedTable(BaseModel):
 
 class SuggestedTables(BaseModel):
     tables: list[SuggestedTable]
+
+
+class DuplicateGroups(BaseModel):
+    groups: list[list[int]] = Field(description="Row numbers that describe the same item, one list per item")
 
 
 class ExtractedRow(BaseModel):
@@ -117,19 +138,87 @@ def suggest_tables(context: str, model: str | None = None) -> list[dict]:
     return [suggestion.model_dump() for suggestion in suggested.tables]
 
 
-def extract_one(text: str, columns: list[dict], model: str | None) -> ChunkRows:
-    """One LLM call, no database access, so it is safe to run many at once.
-
-    Read once greedily, then once more off-greedy if that read runs away: the second read is what
-    keeps one awkward passage from costing a whole document its table (see docs/adr/0001)."""
-    listed = "\n".join(f"{i}. {c['name']}: {c['description']}" for i, c in enumerate(columns, start=1))
-    messages = [("system", EXTRACT_SYSTEM), ("human", f"Columns:\n{listed}\n\nPassage:\n{text}")]
+def read_structured(schema: type[BaseModel], messages: list, model: str | None, max_tokens: int) -> BaseModel:
+    """Read once greedily, then once more off-greedy if that read runs away (see docs/adr/0001)."""
     try:
-        return llm(model, max_tokens=EXTRACT_MAX_TOKENS).with_structured_output(ChunkRows).invoke(messages)
+        return llm(model, max_tokens=max_tokens).with_structured_output(schema).invoke(messages)
     except Exception:
         return llm(
-            model, temperature=RETRY_TEMPERATURE, max_tokens=EXTRACT_MAX_TOKENS,
-        ).with_structured_output(ChunkRows).invoke(messages)
+            model, temperature=RETRY_TEMPERATURE, max_tokens=max_tokens,
+        ).with_structured_output(schema).invoke(messages)
+
+
+def extract_one(text: str, columns: list[dict], model: str | None) -> ChunkRows:
+    """One LLM call, no database access, so it is safe to run many at once. The off-greedy second read
+    is what keeps one awkward passage from costing a whole document its table."""
+    listed = "\n".join(f"{i}. {c['name']}: {c['description']}" for i, c in enumerate(columns, start=1))
+    messages = [("system", EXTRACT_SYSTEM), ("human", f"Columns:\n{listed}\n\nPassage:\n{text}")]
+    return read_structured(ChunkRows, messages, model, EXTRACT_MAX_TOKENS)
+
+
+def find_duplicates(rows: list[dict], columns: list[dict], model: str | None) -> list[list[int]]:
+    """Which rows describe the same item, as groups of row numbers. The model only points at rows;
+    merge_rows does the merging, so a cell value is never rewritten -- it stays quoted as written."""
+    listed = "\n".join(
+        f"{i}. " + " | ".join(f"{c['name']}: {row['values'].get(c['name'], '')}" for c in columns)
+        for i, row in enumerate(rows)
+    )
+    found = read_structured(DuplicateGroups, [("system", MERGE_SYSTEM), ("human", listed)], model, MERGE_MAX_TOKENS)
+    return found.groups
+
+
+def merge_rows(rows: list[dict], groups: list[list[int]]) -> list[dict]:
+    """Fold each group of duplicate rows into one, at the place its first member was found.
+
+    The groups come from a model, so they are trusted only as far as they are valid: numbers out of
+    range, repeated, or already claimed by an earlier group are dropped, a member that contradicts
+    one already in its group stays a row of its own, and a group left with one member merges nothing.
+    The contradiction check is the one that matters -- measured on a real document, Qwen3.5-4B
+    grouped 90 of 99 rows, nearly all of them different items."""
+    claimed: set[int] = set()
+    merged_at: dict[int, list[int]] = {}
+    for group in groups:
+        members: list[int] = []
+        for i in dict.fromkeys(group):
+            if 0 <= i < len(rows) and i not in claimed and all(same_item(rows[i], rows[m]) for m in members):
+                members.append(i)
+        if len(members) > 1:
+            claimed.update(members)
+            merged_at[members[0]] = members
+
+    merged = []
+    for i, row in enumerate(rows):
+        if i in claimed and i not in merged_at:
+            continue  # folded into an earlier row
+        merged.append(combine([rows[m] for m in merged_at.get(i, [i])]))
+    return merged
+
+
+def same_item(a: dict, b: dict) -> bool:
+    """Two rows can be one item only if no column contradicts: in each, one value is empty, or one's
+    words are contained in the other's ("15 Februari 2027" in "paling lambat 15 Februari 2027"), or
+    they share most of their words (the same obligation worded two ways). Two items that differ in
+    any column -- a name, a deadline -- are two items, whatever the model said."""
+    return all(compatible(a["values"].get(name, ""), b["values"].get(name, "")) for name in a["values"])
+
+
+def compatible(a: str, b: str) -> bool:
+    words_a, words_b = set(WORD.findall(a.lower())), set(WORD.findall(b.lower()))
+    if not words_a or not words_b or words_a <= words_b or words_b <= words_a:
+        return True
+    return len(words_a & words_b) / len(words_a | words_b) >= SAME_VALUE_OVERLAP
+
+
+def combine(duplicates: list[dict]) -> dict:
+    """One row from several that describe the same item: each cell takes the first non-empty value
+    (one mention may state a deadline another left out), and the row cites every chunk once."""
+    names = duplicates[0]["values"].keys()
+    values = {name: next((d["values"][name] for d in duplicates if d["values"].get(name)), "") for name in names}
+    citations: list[dict] = []
+    for citation in (c for d in duplicates for c in d["citations"]):
+        if citation["chunk_id"] not in {c["chunk_id"] for c in citations}:
+            citations.append({**citation, "n": len(citations) + 1})
+    return {"values": values, "citations": citations}
 
 
 def run(
@@ -169,4 +258,17 @@ def run(
                 })
             if on_progress:
                 on_progress(done, len(chunks))
-    return rows
+
+    if len(rows) < 2:
+        return rows  # nothing to merge, so no call
+    if should_stop and should_stop():
+        raise Stopped()
+    try:
+        # ponytail: one merge call over every row, so a table past roughly the model's context window
+        # (a few hundred rows at LLM_NUM_CTX 16384) fails to merge. Merge in batches if that happens.
+        groups = find_duplicates(rows, columns, model)
+    except Exception:
+        # The rows took minutes to read and are all correct, just not deduplicated; a failed merge is
+        # no reason to throw them away.
+        return rows
+    return merge_rows(rows, groups)
