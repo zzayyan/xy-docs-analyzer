@@ -6,27 +6,44 @@ import shutil
 import tempfile
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 import openpyxl
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from pydantic import BaseModel
 
 from app import store, table
 from app.config import settings
-from app.graph import to_citations, workflow
+from app.graph import MAX_HISTORY_TURNS, to_citations, workflow
 from app.ingest.convert import page_count, render_page
 from app.ingest.pipeline import create_file, ingest, set_status
-from app.table import Column, Stopped, document_context, propose_columns, suggest_tables
+from app.table import (
+    Column, ProposedColumns, Stopped, SuggestedTables, document_context, propose_columns, suggest_tables,
+)
 from app.table import run as run_table
 
 READ_CHUNK = 1024 * 1024
 
 CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
-app = FastAPI(title="Docs Analyzer")
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Ingests and Table Extractions run as in-process background tasks, so any restart (--reload on a
+    # saved file included) kills them mid-way. Left as they were, they would read "running" forever and
+    # a stuck Table Extraction would refuse every new one for its document.
+    try:
+        store.fail_interrupted("interrupted by a server restart")
+    except Exception as exc:
+        # Neo4j down at boot: start anyway, the first request reports it the same way as before
+        print(f"could not mark interrupted work: {exc}")
+    yield
+
+
+app = FastAPI(title="Docs Analyzer", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -42,11 +59,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     origin = request.headers.get("origin")
     headers = {"Access-Control-Allow-Origin": origin} if origin in CORS_ORIGINS else {}
     return JSONResponse(status_code=500, content={"detail": str(exc)}, headers=headers)
-
-
-class ChatRequest(BaseModel):
-    doc_id: str
-    question: str
 
 
 class Limits(BaseModel):
@@ -84,20 +96,6 @@ class ProposeRequest(BaseModel):
     request: str
 
 
-class ProposedColumns(BaseModel):
-    columns: list[Column]
-
-
-class SuggestedTable(BaseModel):
-    title: str
-    request: str
-    columns: list[Column]
-
-
-class SuggestedTables(BaseModel):
-    tables: list[SuggestedTable]
-
-
 class TableRequest(BaseModel):
     request: str
     columns: list[Column]
@@ -123,13 +121,6 @@ class Citation(BaseModel):
     source: str
     text: str
     regions: list[Region] = []
-
-
-class ChatResponse(BaseModel):
-    answer: str
-    citations: list[Citation]
-    mode: str
-    turn_id: str
 
 
 class Section(BaseModel):
@@ -192,7 +183,7 @@ def get_file(doc_id: str) -> dict:
 def chat_history(doc_id: str) -> list[dict]:
     # Interrupted turns are noise, not a real prior exchange -- excluded rather than fed to
     # graph.py's contextualize/generate as if the partial answer were a complete one.
-    return [{"question": t["question"], "answer": t["answer"]} for t in store.list_turns(doc_id) if t["complete"]]
+    return store.recent_turns(doc_id, MAX_HISTORY_TURNS)
 
 
 def original_path(doc_id: str) -> Path | None:
@@ -225,9 +216,17 @@ def upload_document(file: UploadFile, background: BackgroundTasks) -> dict:
     path = save_upload(file)
     # Ingest runs for minutes per hundred pages, so refuse the work up front instead of timing the user out.
     # The page cap only applies to PDFs: page_count only knows how to read PDF page counts.
-    if path.lower().endswith(".pdf") and (pages := page_count(path)) > settings.max_pages:
-        Path(path).unlink(missing_ok=True)
-        raise HTTPException(status_code=413, detail=f"PDF has {pages} pages, over the {settings.max_pages} page limit")
+    if path.lower().endswith(".pdf"):
+        try:
+            pages = page_count(path)
+        except Exception:
+            pages = 0
+        if not pages:
+            Path(path).unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="not a readable PDF")
+        if pages > settings.max_pages:
+            Path(path).unlink(missing_ok=True)
+            raise HTTPException(status_code=413, detail=f"PDF has {pages} pages, over the {settings.max_pages} page limit")
 
     doc_id = create_file(file.filename or Path(path).name)
     originals = settings.data_dir / "originals"
@@ -333,7 +332,7 @@ def extract_table(doc_id: str, table_id: str, columns: list[dict], model: str | 
         store.set_table_extraction(
             # A row's id is its position when the run finished; deleting a row never renumbers the rest
             table_id, status="done", progress=1.0, rows=[{**row, "id": str(i)} for i, row in enumerate(rows)],
-            chunks_done=len(chunks), chunks_total=len(chunks),
+            chunks_done=len(chunks), chunks_total=len(chunks), when_running=True,
         )
     except Stopped:
         # The user asked for this, so it is not an error and keeps no half-done rows
@@ -449,6 +448,11 @@ def delete_table_row(doc_id: str, table_id: str, row_id: str) -> None:
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
+def cells(values: list) -> list:
+    """Control characters (a form feed Docling kept, say) make openpyxl refuse the whole workbook."""
+    return [ILLEGAL_CHARACTERS_RE.sub("", v) if isinstance(v, str) else v for v in values]
+
+
 @app.get("/documents/{doc_id}/tables/{table_id}/export.xlsx")
 def export_table_extraction(doc_id: str, table_id: str) -> Response:
     extraction = document_table_extraction(doc_id, table_id)
@@ -457,11 +461,17 @@ def export_table_extraction(doc_id: str, table_id: str) -> Response:
     names = [column["name"] for column in extraction["columns"]]
     workbook = openpyxl.Workbook()
     sheet = workbook.active
-    sheet.append([*names, "Pages"])
+    sheet.append(cells([*names, "Pages"]))
     for row in extraction["rows"]:
         # Every page any citation of the row points at, once each, in reading order
         pages = sorted({page for citation in row["citations"] for page in citation["pages"]})
-        sheet.append([*(row["values"].get(name, "") for name in names), ", ".join(map(str, pages)) or None])
+        sheet.append(cells([*(row["values"].get(name, "") for name in names), ", ".join(map(str, pages)) or None]))
+    # Values are quoted from the uploaded document, so a cell reading "=HYPERLINK(...)" must stay text:
+    # openpyxl would otherwise store every string starting with "=" as a live formula
+    for sheet_row in sheet.iter_rows():
+        for cell in sheet_row:
+            if cell.data_type == "f":
+                cell.data_type = "s"
     buffer = io.BytesIO()
     workbook.save(buffer)
     # The request is typed by the user, in any script, and a header must be latin-1: keep only ASCII
@@ -483,22 +493,6 @@ def document_turns(doc_id: str) -> list[dict]:
 def clear_document_turns(doc_id: str) -> None:
     get_file(doc_id)
     store.clear_turns(doc_id)
-
-
-@app.post("/chat", response_model=ChatResponse)
-def chat(body: ChatRequest) -> dict:
-    file = get_file(body.doc_id)
-    if file["status"] != "done":
-        raise HTTPException(status_code=409, detail=f"document is not ready (status: {file['status']})")
-    result = workflow.invoke({
-        "question": body.question, "doc_id": body.doc_id, "mode": file["mode"],
-        "model": file.get("llm_model"), "history": chat_history(body.doc_id),
-    })
-    turn = store.save_turn(
-        body.doc_id, question=body.question, answer=result["answer"],
-        citations=result["citations"], mode=file["mode"], complete=True,
-    )
-    return {"answer": result["answer"], "citations": result["citations"], "mode": file["mode"], "turn_id": turn["id"]}
 
 
 def sse(event: str, data: object) -> str:
@@ -523,6 +517,7 @@ async def stream_answer(
     answer_parts: list[str] = []
     citations: list[dict] = []
     complete = False
+    error: str | None = None
     try:
         async for kind, payload in workflow.astream(
             {"question": question, "doc_id": doc_id, "mode": mode, "model": model, "history": history or []},
@@ -548,12 +543,8 @@ async def stream_answer(
                 answer_parts.append(chunk.text)
                 yield sse("token", chunk.text)
         complete = True
-        yield sse("done", {"turn_id": turn_id})
     except Exception as exc:
-        # Named "failed", not "error": EventSource reserves the name "error" for its own
-        # connection-level failures (fired through onerror, no JSON .data payload) -- a custom SSE
-        # event literally called "error" would collide with that on the client.
-        yield sse("failed", {"detail": str(exc)})
+        error = str(exc)
     finally:
         # Runs even if the client disconnects mid-stream: uvicorn cancels the request's asyncio
         # Task, which raises CancelledError at whatever await this generator is suspended on
@@ -566,6 +557,12 @@ async def stream_answer(
             doc_id, question=question, answer="".join(answer_parts),
             citations=citations, mode=mode, complete=complete, turn_id=turn_id,
         )
+    # Only after the Turn is saved: the client refetches history on either event, and a refetch that
+    # beat the write would drop the answer it just watched stream. A disconnect never gets here.
+    # Named "failed", not "error": EventSource reserves the name "error" for its own
+    # connection-level failures (fired through onerror, no JSON .data payload) -- a custom SSE
+    # event literally called "error" would collide with that on the client.
+    yield sse("failed", {"detail": error}) if error is not None else sse("done", {"turn_id": turn_id})
 
 
 @app.get("/chat/stream")

@@ -21,7 +21,6 @@ class State(TypedDict, total=False):
     retrieved: Annotated[list[dict], operator.add]  # parallel retrievers append here
     contexts: list[dict]  # deduplicated, budgeted input for generate
     answer: str
-    citations: list[dict]
 
 
 SYSTEM_PROMPT = (
@@ -67,7 +66,9 @@ def recent_history(state: State) -> list[dict]:
 
 
 def route(state: State) -> list[str]:
-    return ["tree_search", "kg_retrieve"] if state["mode"] == "long" else ["vector_retrieve"]
+    # Long documents keep vector search too: tree search depends on the model picking the right section,
+    # the graph only finds named entities, and a question about one clause or number can miss both
+    return ["tree_search", "kg_retrieve", "vector_retrieve"] if state["mode"] == "long" else ["vector_retrieve"]
 
 
 def contextualize(state: State) -> dict:
@@ -135,7 +136,7 @@ def fuse(state: State) -> dict:
 
 def to_citations(contexts: list[dict]) -> list[dict]:
     """Citation entries for the frontend: includes chunk text so drill-down needs no extra lookup, and
-    survives a chunk being deleted or re-ingested later (used both live and when persisting chat history)."""
+    survives a chunk being deleted or re-ingested later (sent live, and persisted with the Turn)."""
     return [
         {
             "n": n,
@@ -165,7 +166,7 @@ def generate(state: State) -> dict:
         *history_messages,
         ("human", f"Context:\n{blocks}\n\nQuestion: {state['question']}"),
     ])
-    return {"answer": message.content, "citations": to_citations(contexts)}
+    return {"answer": message.content}
 
 
 builder = StateGraph(State)

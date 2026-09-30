@@ -52,15 +52,23 @@ def test_extraction_runs_concurrently_and_writes_in_chunk_order(monkeypatch, chu
     assert progress == [(i, 8) for i in range(1, 9)]
 
 
-def test_a_failing_chunk_aborts_the_ingest(monkeypatch, chunks):
-    def boom(text: str):
-        if text.endswith("3"):
-            raise RuntimeError("model refused")
-        return fake_doc(text)
+def test_a_chunk_that_keeps_failing_is_skipped_and_a_flaky_one_is_retried(monkeypatch, chunks):
+    calls: dict[str, int] = {}
 
+    class Transformer:
+        def convert_to_graph_documents(self, docs):
+            text = docs[0].page_content
+            calls[text] = calls.get(text, 0) + 1
+            if text.endswith("3") or (text.endswith("5") and calls[text] == 1):
+                raise RuntimeError("model refused")
+            return [fake_doc(text)]
+
+    recorder = Recorder()
     monkeypatch.setattr(settings, "llm_concurrency", 4)
-    monkeypatch.setattr(kg, "extract_one", boom)
-    monkeypatch.setattr(kg, "graph", lambda: Recorder())
+    monkeypatch.setattr(kg, "transformer", lambda: Transformer())
+    monkeypatch.setattr(kg, "graph", lambda: recorder)
 
-    with pytest.raises(RuntimeError, match="model refused"):
-        kg.extract_graph("f", chunks)
+    assert kg.extract_graph("f", chunks) == 1
+    assert calls["text 3"] == kg.ATTEMPTS
+    written = [chunk_id for kind, chunk_id in recorder.writes if kind == "entities"]
+    assert written == [c["id"] for c in chunks if c["id"] != "f:3"], "chunk 5 succeeded on its retry"

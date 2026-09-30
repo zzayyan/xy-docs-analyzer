@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 interface ToastProps {
   message: string;
@@ -11,10 +11,17 @@ interface ToastProps {
  * tokens. Auto-dismisses but stays clickable to dismiss early — errors worth surfacing (a 413
  * from the upload cap, a failed delete) are worth reading, not just flashing past. */
 export function Toast({ message, onDismiss, duration = 6000 }: ToastProps) {
+  // Callers pass a fresh inline onDismiss every render, and a polling screen re-renders every
+  // couple of seconds: timing off it would restart the countdown each time, so it never fired.
+  const dismissRef = useRef(onDismiss);
   useEffect(() => {
-    const timer = setTimeout(onDismiss, duration);
+    dismissRef.current = onDismiss;
+  });
+
+  useEffect(() => {
+    const timer = setTimeout(() => dismissRef.current(), duration);
     return () => clearTimeout(timer);
-  }, [onDismiss, duration]);
+  }, [message, duration]);
 
   return (
     <div

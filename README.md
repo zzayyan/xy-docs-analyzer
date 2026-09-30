@@ -1,9 +1,9 @@
 # docs-analyzer
 
-Document analyzer: vector RAG for short documents, section tree + knowledge graph for
-long documents. Short documents get hybrid vector + fulltext search; documents past
-`LONG_DOC_TOKENS` (default 20,000) also get a section outline and an entity/relationship
-graph extracted per chunk.
+Document analyzer: hybrid vector + fulltext search for every document, plus a section
+tree and a knowledge graph for long ones. Documents past `LONG_DOC_TOKENS` (default
+20,000) also get a section outline and an entity/relationship graph extracted per chunk,
+searched alongside the vectors.
 
 Stack: FastAPI + LangGraph on the backend, Docling for ingest, Neo4j for storage
 (vectors, fulltext, section tree, knowledge graph, chat history), a React + Vite
@@ -47,13 +47,14 @@ UI on `http://localhost:5173`.
 `openai` (the latter covers any OpenAI-compatible server: vLLM, OpenRouter, OpenAI
 itself). See `backend/.env.example` for every field, including per-provider
 `*_BASE_URL`/`*_API_KEY`/`*_MODEL`. A reasoning model behind an OpenAI-compatible
-endpoint may need `reasoning_effort="none"` in `backend/app/models.py` — see the
-comment there — or its answers stream out as pure reasoning tokens with an empty
-`content`.
+endpoint (Qwen3.5 on vLLM, for one) needs `LLM_REASONING_EFFORT=none`, or its answers
+stream out as pure reasoning tokens with an empty `content`. Leave it unset for
+OpenAI's own models, which reject the parameter.
 
 Switching embedding models after documents are already ingested is a breaking change:
-`backend/app/db.py`'s `check_embedding_model` refuses to start if stored vectors don't
-match the configured model/dimension, since vectors from different models aren't
+`backend/app/db.py`'s `check_embedding_model` fails every request, from the first one,
+with a message saying how to reset, if stored vectors don't match the configured
+model/dimension, since vectors from different models aren't
 comparable. Re-ingest every document (there's no in-place re-embed) or switch back.
 
 ## Tests
@@ -74,7 +75,10 @@ npx tsc -b && npm run lint && npm run build
   opens from the Document header's "Original" link; deleting the Document deletes its
   Original. Documents ingested
   before this change have no Original. There's still no re-ingest: a document that fails
-  partway through has to be re-uploaded.
+  partway through has to be re-uploaded. A server restart (including `--reload` picking
+  up a saved file) marks every unfinished ingest and table run as failed.
+- **One PDF converts at a time.** Docling peaks at ~14 GB per 25-page batch, so a second
+  upload stays `queued` until the first finishes converting.
 - **No auth.** Every document is readable and deletable by anyone who can reach the
   API. Fine on localhost; don't bind `--host 0.0.0.0` without adding auth first.
 - Ingest throughput is roughly 10-20 seconds per PDF page end to end (Docling

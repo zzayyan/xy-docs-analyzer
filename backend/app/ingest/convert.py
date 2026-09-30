@@ -8,6 +8,7 @@ from docling.chunking import HybridChunker
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.utils.locks import pypdfium2_lock
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 from docling_core.types.doc.document import DoclingDocument, PageItem
 from transformers import AutoTokenizer
@@ -27,13 +28,16 @@ def converter(ocr: bool = True) -> DocumentConverter:
 
 def has_text_layer(path: str) -> bool:
     """Whether the PDF carries its own text, sampled across the document."""
-    pdf = pypdfium2.PdfDocument(path)
-    try:
-        step = max(1, len(pdf) // TEXT_LAYER_SAMPLE)
-        sampled = [len(pdf[i].get_textpage().get_text_range().strip()) for i in range(0, len(pdf), step)]
-        return sum(sampled) / len(sampled) > TEXT_LAYER_CHARS
-    finally:
-        pdf.close()
+    # PDFium is not thread-safe: every call shares Docling's own lock, since a conversion or a page
+    # render can be running on another thread. Never held around a Docling convert(), which takes it.
+    with pypdfium2_lock:
+        pdf = pypdfium2.PdfDocument(path)
+        try:
+            step = max(1, len(pdf) // TEXT_LAYER_SAMPLE)
+            sampled = [len(pdf[i].get_textpage().get_text_range().strip()) for i in range(0, len(pdf), step)]
+            return sum(sampled) / len(sampled) > TEXT_LAYER_CHARS
+        finally:
+            pdf.close()
 
 
 @lru_cache
@@ -47,11 +51,12 @@ def tokenizer() -> HuggingFaceTokenizer:
 
 def page_count(path: str) -> int:
     """Pages in a PDF, cheap enough to run before deciding whether to ingest it at all."""
-    pdf = pypdfium2.PdfDocument(path)
-    try:
-        return len(pdf)
-    finally:
-        pdf.close()
+    with pypdfium2_lock:
+        pdf = pypdfium2.PdfDocument(path)
+        try:
+            return len(pdf)
+        finally:
+            pdf.close()
 
 
 RENDER_SCALE = 2  # ~144 DPI: legible for a Highlight, small enough to ship over the wire
@@ -59,15 +64,16 @@ RENDER_SCALE = 2  # ~144 DPI: legible for a Highlight, small enough to ship over
 
 def render_page(path: str, page_no: int, scale: float = RENDER_SCALE) -> bytes | None:
     """A PDF page as a PNG, for the citation panel's Highlight view. None for a page out of range."""
-    pdf = pypdfium2.PdfDocument(path)
-    try:
-        if not 1 <= page_no <= len(pdf):
-            return None
-        buffer = BytesIO()
-        pdf[page_no - 1].render(scale=scale).to_pil().save(buffer, "PNG")
-        return buffer.getvalue()
-    finally:
-        pdf.close()
+    with pypdfium2_lock:
+        pdf = pypdfium2.PdfDocument(path)
+        try:
+            if not 1 <= page_no <= len(pdf):
+                return None
+            buffer = BytesIO()
+            pdf[page_no - 1].render(scale=scale).to_pil().save(buffer, "PNG")
+            return buffer.getvalue()
+        finally:
+            pdf.close()
 
 
 def regions_of(doc_items, pages: dict[int, PageItem]) -> list[dict]:

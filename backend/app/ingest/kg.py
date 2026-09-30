@@ -39,33 +39,57 @@ def entity_key(name: str) -> str:
     return " ".join(name.lower().split())
 
 
+ATTEMPTS = 3
+
+
 def extract_one(text: str):
-    """One LLM call, no database access, so it is safe to run many at once."""
-    [doc] = transformer().convert_to_graph_documents([Document(page_content=text)])
-    return doc
+    """One LLM call, no database access, so it is safe to run many at once. None when every attempt
+    failed: the graph only helps retrieval, and the chunk stays findable through the outline and vector
+    search, so one bad chunk is skipped rather than failing a whole Document after its conversion."""
+    for _ in range(ATTEMPTS):
+        try:
+            [doc] = transformer().convert_to_graph_documents([Document(page_content=text)])
+            return doc
+        except Exception:
+            pass
+    return None
 
 
-def extract_graph(file_id: str, chunks: list[dict], on_progress: Callable[[int, int], None] | None = None) -> None:
-    """Extract entities and relationships per chunk and link each chunk to the entities it mentions."""
+def extract_graph(file_id: str, chunks: list[dict], on_progress: Callable[[int, int], None] | None = None) -> int:
+    """Extract entities and relationships per chunk and link each chunk to the entities it mentions.
+    Returns how many chunks were skipped because extraction kept failing on them."""
+    skipped = 0
     # Extraction is one HTTP call per chunk, so it parallelises; the writes stay on this thread because
     # concurrent MERGE on the same __Entity__ nodes deadlocks in Neo4j. map() keeps chunk order, and
     # consuming it inside the pool interleaves writes with extraction so progress moves while work runs.
     with ThreadPoolExecutor(max_workers=settings.llm_concurrency) as pool:
         extracted = pool.map(extract_one, [chunk["text"] for chunk in chunks])
+        try:
+            for done, (chunk, doc) in enumerate(zip(chunks, extracted), start=1):
+                if doc is None:
+                    skipped += 1
+                else:
+                    write_chunk_graph(file_id, chunk["id"], doc)
+                if on_progress:
+                    on_progress(done, len(chunks))
+        finally:
+            # A raise in the loop (the Document was deleted) cancels every chunk not yet started,
+            # instead of the pool's exit waiting for all of them to run
+            extracted.close()
+    return skipped
 
-        for done, (chunk, doc) in enumerate(zip(chunks, extracted), start=1):
-            entities = {entity_key(n.id): {"key": entity_key(n.id), "name": n.id, "type": n.type} for n in doc.nodes}
-            # Relationship endpoints are not always listed in doc.nodes
-            for rel in doc.relationships:
-                for node in (rel.source, rel.target):
-                    entities.setdefault(entity_key(node.id), {"key": entity_key(node.id), "name": node.id, "type": node.type})
-            relationships = [
-                {"source": entity_key(r.source.id), "target": entity_key(r.target.id), "type": r.type}
-                for r in doc.relationships
-            ]
 
-            params = {"file_id": file_id, "chunk_id": chunk["id"]}
-            graph().query(WRITE_ENTITIES, {**params, "entities": list(entities.values())})
-            graph().query(WRITE_RELATIONSHIPS, {**params, "relationships": relationships})
-            if on_progress:
-                on_progress(done, len(chunks))
+def write_chunk_graph(file_id: str, chunk_id: str, doc) -> None:
+    entities = {entity_key(n.id): {"key": entity_key(n.id), "name": n.id, "type": n.type} for n in doc.nodes}
+    # Relationship endpoints are not always listed in doc.nodes
+    for rel in doc.relationships:
+        for node in (rel.source, rel.target):
+            entities.setdefault(entity_key(node.id), {"key": entity_key(node.id), "name": node.id, "type": node.type})
+    relationships = [
+        {"source": entity_key(r.source.id), "target": entity_key(r.target.id), "type": r.type}
+        for r in doc.relationships
+    ]
+
+    params = {"file_id": file_id, "chunk_id": chunk_id}
+    graph().query(WRITE_ENTITIES, {**params, "entities": list(entities.values())})
+    graph().query(WRITE_RELATIONSHIPS, {**params, "relationships": relationships})

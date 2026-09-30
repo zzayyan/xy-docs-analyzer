@@ -47,3 +47,20 @@ def test_contextualize_falls_back_to_original_question_if_llm_returns_empty(monk
 
     state = {"question": "and then?", "history": [{"question": "q", "answer": "a"}]}
     assert graph_module.contextualize(state) == {"search_query": "and then?"}
+
+
+def test_a_long_document_also_searches_vectors_and_fuses_once(monkeypatch):
+    chunk = lambda cid: {"id": cid, "text": cid, "pages": [1], "headings": [], "regions": None}
+    monkeypatch.setattr(graph_module.vector, "search", lambda doc_id, query: [chunk("f:1")])
+    monkeypatch.setattr(graph_module.tree_search, "search", lambda doc_id, query, model: [chunk("f:2")])
+    monkeypatch.setattr(graph_module.kg, "search", lambda doc_id, query, model: ([], [chunk("f:1")]))
+    monkeypatch.setattr(graph_module, "tokenizer", lambda: type("T", (), {"count_tokens": staticmethod(len)})())
+    monkeypatch.setattr(graph_module, "llm", lambda model=None: _FakeLLM("answer"))
+
+    updates = list(graph_module.workflow.stream(
+        {"question": "q", "doc_id": "f", "mode": "long", "history": []}, stream_mode="updates",
+    ))
+
+    fused = [u["fuse"] for u in updates if "fuse" in u]
+    assert len(fused) == 1, "fuse waits for all three retrievers, then runs once"
+    assert {c["source"] for c in fused[0]["contexts"]} == {"tree", "vector"}, "vector hits reach the answer"

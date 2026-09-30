@@ -1,4 +1,5 @@
 import json
+import threading
 import uuid
 
 from app.config import settings
@@ -8,12 +9,32 @@ from app.ingest.kg import extract_graph
 from app.ingest.tree import build_tree
 from app.models import embeddings
 
+# Docling peaks at ~14 GB converting one 25-page batch (see convert_document), so two conversions at
+# once can exhaust memory and kill the worker. Only conversion is serialized; embedding, summaries and
+# graph extraction are HTTP calls and overlap freely.
+# ponytail: one global lock, so a queued upload waits for the whole conversion ahead of it; a bounded
+# semaphore sized to RAM if several must convert at once.
+CONVERT_LOCK = threading.Lock()
 
-def set_status(file_id: str, **props) -> None:
-    graph().query(
-        "MATCH (f:File {id: $id}) SET f += $props, f.updated_at = timestamp()",
+
+class Deleted(Exception):
+    """The Document was deleted while its ingest was still running: nothing left to write to."""
+
+
+def set_status(file_id: str, **props) -> bool:
+    """False when the File no longer exists, i.e. its Document was deleted."""
+    rows = graph().query(
+        "MATCH (f:File {id: $id}) SET f += $props, f.updated_at = timestamp() RETURN count(f) AS n",
         {"id": file_id, "props": props},
     )
+    return bool(rows and rows[0]["n"])
+
+
+def step(file_id: str, **props) -> None:
+    """set_status for ingest's own progress: stops the ingest once the Document is gone, instead of
+    spending minutes of LLM calls on writes that would all match nothing."""
+    if not set_status(file_id, **props):
+        raise Deleted()
 
 
 def create_file(name: str) -> str:
@@ -27,18 +48,20 @@ def create_file(name: str) -> str:
 
 def progress_between(file_id: str, start: float, end: float):
     def on_progress(done: int, total: int) -> None:
-        set_status(file_id, progress=round(start + (end - start) * done / total, 3), step_done=done, step_total=total)
+        step(file_id, progress=round(start + (end - start) * done / total, 3), step_done=done, step_total=total)
 
     return on_progress
 
 
 def ingest(file_id: str, path: str) -> None:
     try:
-        set_status(file_id, status="converting", progress=0.05, step_done=0, step_total=0)
-        doc, tokens, chunks = convert(path, on_progress=progress_between(file_id, 0.05, 0.3))
+        # Stays "queued" until this upload's turn to convert comes
+        with CONVERT_LOCK:
+            step(file_id, status="converting", progress=0.05, step_done=0, step_total=0)
+            doc, tokens, chunks = convert(path, on_progress=progress_between(file_id, 0.05, 0.3))
         mode = "long" if tokens > settings.long_doc_tokens else "short"
         # embedding is one call for every chunk at once, so it has no sub-progress of its own
-        set_status(
+        step(
             file_id, tokens=tokens, mode=mode, chunks=len(chunks),
             status="embedding", progress=0.3, step_done=0, step_total=0,
         )
@@ -62,12 +85,16 @@ def ingest(file_id: str, path: str) -> None:
         )
 
         if mode == "long":
-            set_status(file_id, status="building_tree", progress=0.35, step_done=0, step_total=0)
+            step(file_id, status="building_tree", progress=0.35, step_done=0, step_total=0)
             build_tree(file_id, doc, rows, on_progress=progress_between(file_id, 0.35, 0.6))
-            set_status(file_id, status="extracting_graph", progress=0.6, step_done=0, step_total=0)
-            extract_graph(file_id, rows, on_progress=progress_between(file_id, 0.6, 0.95))
+            step(file_id, status="extracting_graph", progress=0.6, step_done=0, step_total=0)
+            skipped = extract_graph(file_id, rows, on_progress=progress_between(file_id, 0.6, 0.95))
+            # Recorded, not silent: how many chunks have no graph because extraction kept failing on them
+            step(file_id, graph_skipped=skipped)
 
         set_status(file_id, status="done", progress=1.0, step_done=0, step_total=0)
+    except Deleted:
+        return  # the user deleted it: not an error, and nothing left to mark
     except Exception as exc:
         set_status(file_id, status="error", error=str(exc))
         raise

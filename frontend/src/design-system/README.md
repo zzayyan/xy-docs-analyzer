@@ -9,43 +9,32 @@ not a live sync — re-pull manually if the source project changes.
 
 - `tokens/*.css`, `styles.css` — full copy, all six token files plus the
   import barrel.
-- `components/{core,data,feedback,forms,navigation}/*.jsx` + `*.d.ts` — the
-  subset this app uses: `Button`, `Card`, `Pill`, `Logo`, `BrandIcon` (core),
-  `DataTable`, `ProgressBar`, `Metric` (data), `Alert`, `Badge` (feedback),
-  `Textarea` (forms), `SideNav`, `Tabs` (navigation). `Input`, `Select`,
-  `Checkbox`, `Switch`, `TopBar`, `SectionHeading`, `StepFlow` were not
-  pulled — none of this app's screens need them. Re-pull them the same way
-  (`get_file` on their path under `components/`) if a later screen does.
-- `assets/icons/*.png`, `assets/logo-*.png` — see below.
+- `components/{core,data,feedback}/*.jsx` + `*.d.ts` — only what this app
+  renders: `Button`, `Logo` (core), `DataTable`, `ProgressBar` (data),
+  `Alert`, `Badge` (feedback). Everything else in the source project was left
+  out or deleted once unused (`Card`, `Pill`, `BrandIcon`, `Metric`,
+  `Textarea`, `SideNav`, `Tabs`, and the brand icon PNGs). Re-pull a component
+  the same way (`get_file` on its path under `components/`) when a screen
+  needs it.
+- `assets/logo-*.png` (served from `frontend/public/design-system/assets/`).
 
-## Known gap: two icons could not be fetched
+## Known gap: large assets cannot be fetched
 
 `get_file` caps at 256 KiB per the tool's own description. Two icons in the
 source set exceed that when base64-encoded (`brain-circuit.png`,
 `team-gear-network.png`) — the returned content was silently truncated at
 exactly 262144 base64 characters, which decodes to a corrupt PNG (confirmed
-truncated with PIL). Both files were deleted rather than shipped corrupt.
-Neither is wired into any screen yet, so this cost nothing functional. All
-three icons that did fetch cleanly (`database-stack`, `user-lock`,
-`dashboard-analytics`) are also currently unused — pulled ahead of the
-screens that were expected to need them (documents nav, a privacy footer
-note), but P1 shipped with a header-only shell (see `App.tsx`) that doesn't
-use `BrandIcon` anywhere yet. Wire them in when a screen actually calls for
-an icon, or delete the ones that go unused once the icon set settles.
-
-If a later screen needs `brain-circuit` or similar, there's no way to fetch
-it whole through this tool — get the file some other way (e.g. ask the user
-to export it from claude.ai/design, or use a different brand icon that fits
-under the cap) rather than re-attempting `get_file` on it.
+truncated with PIL). If a screen needs one, get the file some other way (e.g.
+ask the user to export it from claude.ai/design, or use a different brand icon
+that fits under the cap) rather than re-attempting `get_file` on it.
 
 ## Path convention
 
-`Logo` and `BrandIcon` resolve string paths themselves (see their `.jsx`),
+`Logo` resolves string paths itself (see its `.jsx`),
 so binary assets are served as static files rather than bundled as JS
 modules — they live under `frontend/public/design-system/assets/` and are
 referenced by every call site with an absolute path
-(`/design-system/assets/...`), never a bare icon name, so `BrandIcon`'s
-relative-path fallback never triggers.
+(`/design-system/assets/...`).
 
 ## Verifying a re-pulled binary asset
 

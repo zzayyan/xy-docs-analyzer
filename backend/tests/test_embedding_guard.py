@@ -34,23 +34,21 @@ def active(monkeypatch):
     return "bge-m3", 1024
 
 
-def test_same_model_keeps_the_index(active):
+def test_same_model_passes(active):
     g = FakeGraph(*active, chunks=42)
     check_embedding_model(g)
-    assert not any("DROP INDEX" in s for s in g.statements)
 
 
 def test_switching_model_with_stored_chunks_fails_loudly(active):
     g = FakeGraph("nvidia/nemotron-3-embed-1b:free", 2048, chunks=7)
     with pytest.raises(RuntimeError, match="7 chunks"):
         check_embedding_model(g)
-    assert not any("DROP INDEX" in s for s in g.statements), "must not drop the index while chunks exist"
+    assert g.marker["model"] != "bge-m3", "must not adopt the new model while old vectors exist"
 
 
-def test_switching_model_on_empty_database_rebuilds_the_index(active):
+def test_switching_model_on_empty_database_adopts_the_new_model(active):
     g = FakeGraph("nvidia/nemotron-3-embed-1b:free", 2048, chunks=0)
     check_embedding_model(g)
-    assert any("DROP INDEX chunk_embedding" in s for s in g.statements)
     assert g.marker == {"model": "bge-m3", "dim": 1024}
 
 

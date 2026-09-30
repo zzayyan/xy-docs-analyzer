@@ -41,24 +41,29 @@ def parse_sse(text: str) -> list[tuple[str, object]]:
 @pytest.fixture
 def stubbed(monkeypatch):
     monkeypatch.setattr(store_module, "get_file", fake_document)
-    monkeypatch.setattr(store_module, "list_turns", lambda file_id: [])
+    monkeypatch.setattr(store_module, "recent_turns", lambda file_id, n: [])
     saved = {}
     monkeypatch.setattr(store_module, "save_turn", lambda file_id, **kw: saved.update(kw) or saved)
     return saved
 
 
-def test_chat_history_excludes_incomplete_turns_and_keeps_question_answer_only(monkeypatch):
-    monkeypatch.setattr(store_module, "list_turns", lambda file_id: [
-        {"id": "t1", "question": "q1", "answer": "a1", "citations": [], "mode": "short", "complete": True, "created_at": 1},
-        {"id": "t2", "question": "q2", "answer": "", "citations": [], "mode": "short", "complete": False, "created_at": 2},
-    ])
+def test_chat_history_reads_only_the_turns_the_graph_uses(monkeypatch):
+    seen = []
+
+    class Graph:
+        def query(self, statement, params):
+            seen.append((statement, params))
+            return [{"question": "q1", "answer": "a1"}]
+
+    monkeypatch.setattr(store_module, "graph", lambda: Graph())
     assert api_module.chat_history("d1") == [{"question": "q1", "answer": "a1"}]
+    [(statement, params)] = seen
+    assert "WHERE t.complete" in statement, "interrupted turns are not history"
+    assert params["n"] == api_module.MAX_HISTORY_TURNS
 
 
 def test_stream_answer_passes_history_through_to_the_graph(stubbed, monkeypatch):
-    monkeypatch.setattr(store_module, "list_turns", lambda file_id: [
-        {"id": "t1", "question": "earlier q", "answer": "earlier a", "citations": [], "mode": "long", "complete": True, "created_at": 1},
-    ])
+    monkeypatch.setattr(store_module, "recent_turns", lambda file_id, n: [{"question": "earlier q", "answer": "earlier a"}])
     seen_state = {}
 
     async def fake_stream(state, stream_mode):
@@ -125,6 +130,28 @@ def test_disconnect_mid_stream_persists_partial_answer_as_incomplete(stubbed, mo
 
     assert stubbed["answer"] == "partial"
     assert stubbed["complete"] is False
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_the_turn_is_saved_before_the_final_event_goes_out(stubbed, monkeypatch, fails):
+    # The client refetches history on "done"/"failed": a Turn written after the event could be missed
+    async def fake_stream(state, stream_mode):
+        yield ("messages", (FakeChunk("answer"), {"langgraph_node": "generate"}))
+        if fails:
+            raise RuntimeError("model down")
+
+    monkeypatch.setattr(api_module.workflow, "astream", fake_stream)
+
+    async def run():
+        events = []
+        async for frame in api_module.stream_answer("d1", "hi?", "long"):
+            events.append((parse_sse(frame)[0][0], "answer" in stubbed))
+        return events
+
+    final_event, saved_by_then = asyncio.run(run())[-1]
+    assert final_event == ("failed" if fails else "done")
+    assert saved_by_then
+    assert stubbed["complete"] is (not fails)
 
 
 def test_document_not_ready_returns_409_before_streaming_starts(monkeypatch):

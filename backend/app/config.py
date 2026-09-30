@@ -18,7 +18,10 @@ class Settings(BaseSettings):
     llm_model: str = "qwen3:14b"
     # Ollama's default context is small and truncates silently; ignored by OpenAI-compatible servers
     llm_num_ctx: int = 16384
-    # Extra model names selectable per document at upload time, alongside llm_model (the default).
+    # Sent as reasoning_effort to an OpenAI-compatible server only when set. "none" for Qwen3.5 on vLLM,
+    # which otherwise streams pure reasoning with an empty answer; leave unset for OpenAI's own models.
+    llm_reasoning_effort: str | None = None
+    # Extra model names selectable per document from the chat's model picker, alongside llm_model (the default).
     # Comma-separated; every one must be reachable through the single llm_provider/llm_base_url/
     # llm_api_key above -- this offers model *names*, not a second provider.
     llm_model_choices: str = ""

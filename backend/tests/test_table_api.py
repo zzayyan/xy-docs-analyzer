@@ -43,7 +43,11 @@ def stubbed(monkeypatch):
     monkeypatch.setattr(store_module, "list_chunks", list_chunks)
     monkeypatch.setattr(store_module, "chunk_reads", reads, raising=False)
     monkeypatch.setattr(store_module, "create_table_extraction", create_table_extraction)
-    monkeypatch.setattr(store_module, "set_table_extraction", lambda table_id, **props: tables[table_id].update(props))
+    def set_table_extraction(table_id: str, when_running: bool = False, **props) -> None:
+        if not when_running or tables[table_id]["status"] == "running":
+            tables[table_id].update(props)
+
+    monkeypatch.setattr(store_module, "set_table_extraction", set_table_extraction)
     monkeypatch.setattr(store_module, "list_table_extractions", lambda file_id: list(tables.values()))
     monkeypatch.setattr(store_module, "get_table_extraction", lambda file_id, table_id: tables.get(table_id))
     monkeypatch.setattr(store_module, "delete_table_extraction", lambda file_id, table_id: tables.pop(table_id, None))
@@ -95,6 +99,18 @@ def test_a_failed_run_is_stored_with_its_error_and_keeps_its_columns(stubbed, mo
     assert saved["status"] == "error"
     assert saved["error"] == "model refused"
     assert saved["columns"] == COLUMNS
+
+
+def test_a_cancel_that_lands_after_the_last_chunk_is_not_overwritten_by_done(stubbed, monkeypatch):
+    def cancelled_while_merging(chunks, columns, model, on_progress, should_stop):
+        stubbed["e1"]["status"] = "cancelled"  # the user's cancel, landing during the merge call
+        return [{"values": {"Kewajiban": "bayar"}, "citations": []}]
+
+    monkeypatch.setattr(api_module, "run_table", cancelled_while_merging)
+
+    table_id = client.post("/documents/d1/tables", json={"request": "q", "columns": COLUMNS}).json()["id"]
+
+    assert client.get(f"/documents/d1/tables/{table_id}").json()["status"] == "cancelled"
 
 
 def test_create_is_409_while_the_document_is_still_ingesting(stubbed, monkeypatch):
@@ -306,3 +322,13 @@ def test_a_request_in_any_script_still_exports_under_a_safe_filename(finished):
 
     assert response.status_code == 200
     assert 'filename="Kewajiban penting.xlsx"' in response.headers["content-disposition"]
+
+
+def test_document_text_exports_as_text_never_as_a_formula_or_a_broken_workbook(finished):
+    finished["e1"]["rows"][0]["values"] = {"Kewajiban": '=HYPERLINK("http://x","klik")', "Tenggat": "31\x0cJan"}
+
+    response = client.get("/documents/d1/tables/e1/export.xlsx")
+
+    assert response.status_code == 200
+    row = list(openpyxl.load_workbook(io.BytesIO(response.content)).active.iter_rows())[1]
+    assert [(cell.value, cell.data_type) for cell in row[:2]] == [('=HYPERLINK("http://x","klik")', "s"), ("31Jan", "s")]

@@ -62,13 +62,6 @@ export interface Citation {
   regions: Region[];
 }
 
-export interface ChatResponse {
-  answer: string;
-  citations: Citation[];
-  mode: 'short' | 'long';
-  turn_id: string;
-}
-
 export interface Section {
   id: string;
   title: string;
@@ -223,13 +216,6 @@ export const api = {
   listTables: (docId: string) => request<TableExtraction[]>(`/documents/${docId}/tables`),
 
   getTable: (docId: string, tableId: string) => request<TableExtraction>(`/documents/${docId}/tables/${tableId}`),
-
-  chat: (docId: string, question: string) =>
-    request<ChatResponse>('/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ doc_id: docId, question }),
-    }),
 };
 
 /** Statuses that mean ingest is still running — used to decide whether to keep polling. */

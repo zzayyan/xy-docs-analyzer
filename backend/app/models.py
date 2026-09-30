@@ -8,6 +8,11 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from app.config import settings
 
 
+# A hung model server would otherwise hold an ingest or a table run at the same step forever. Long enough
+# for the slowest honest call measured (a runaway chunk capped at EXTRACT_MAX_TOKENS).
+LLM_TIMEOUT_S = 300
+
+
 def _api_key(key: str, env_var: str) -> str:
     # Without this the failure surfaces as an opaque auth error from the server
     if not key:
@@ -35,8 +40,10 @@ def _llm(model: str, temperature: float = 0.0, max_tokens: int | None = None) ->
             base_url=settings.llm_base_url,
             temperature=temperature,
             max_tokens=max_tokens,
-            # Qwen3.5 on vLLM spends every token on reasoning and leaves content empty until it stops
-            reasoning_effort="none",
+            timeout=LLM_TIMEOUT_S,
+            # Only when configured: Qwen3.5 on vLLM needs "none" or it spends every token on reasoning and
+            # leaves content empty, while OpenAI itself rejects the parameter on non-reasoning models
+            **({"reasoning_effort": settings.llm_reasoning_effort} if settings.llm_reasoning_effort else {}),
         )
     return ChatOllama(
         model=model,
@@ -45,6 +52,7 @@ def _llm(model: str, temperature: float = 0.0, max_tokens: int | None = None) ->
         # Ollama's own name for a cap on the output; -1 is its default "no cap"
         num_predict=max_tokens or -1,
         num_ctx=settings.llm_num_ctx,
+        client_kwargs={"timeout": LLM_TIMEOUT_S},
         # Keeps qwen3 <think> output out of answers and extraction JSON
         reasoning=False,
     )

@@ -2,6 +2,8 @@
 columns/rows are (a Neo4j property can't hold a list of maps). No real Neo4j needed."""
 import json
 
+import pytest
+
 import app.graph as graph_mod
 import app.store as store_module
 
@@ -58,7 +60,7 @@ def test_ingest_writes_each_chunks_regions_to_neo4j_as_json(monkeypatch):
     class Graph:
         def query(self, statement: str, params: dict) -> list:
             written.append((statement, params))
-            return []
+            return [{"n": 1}] if "count(f)" in statement else []
 
     chunks = [
         {"idx": 0, "text": "a", "pages": [1], "headings": [], "regions": [REGION]},
@@ -73,3 +75,21 @@ def test_ingest_writes_each_chunks_regions_to_neo4j_as_json(monkeypatch):
     [(statement, params)] = [(s, p) for s, p in written if "MERGE (c:Chunk" in s]
     assert "c.regions = r.regions" in statement
     assert [json.loads(r["regions"]) for r in params["rows"]] == [[REGION], []]
+
+
+def test_a_document_deleted_mid_ingest_stops_it_without_an_error(monkeypatch):
+    import app.ingest.pipeline as pipeline
+
+    written: list[str] = []
+
+    class Graph:  # the File is already gone: every status write matches nothing
+        def query(self, statement: str, params: dict) -> list:
+            written.append(statement)
+            return [{"n": 0}] if "count(f)" in statement else []
+
+    monkeypatch.setattr(pipeline, "graph", lambda: Graph())
+    monkeypatch.setattr(pipeline, "convert", lambda path, on_progress=None: pytest.fail("converted a deleted document"))
+
+    pipeline.ingest("f", "doc.pdf")
+
+    assert len(written) == 1, "stopped at the first status write, no error status attempted"

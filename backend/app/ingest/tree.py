@@ -11,6 +11,7 @@ from app.models import llm
 
 FALLBACK_GROUP_CHUNKS = 8
 SUMMARY_MAX_CHARS = 12000
+SUMMARY_ATTEMPTS = 3
 
 LETTER = re.compile(r"^[A-Z][.)]\s+")
 NUMBER = re.compile(
@@ -128,15 +129,26 @@ def summarize_sections(
             # Container heading with no body text: its children describe it, no LLM call needed
             return "Contains: " + "; ".join(child_titles.get(section["id"], []))
         text = "\n\n".join(texts[section["id"]])[:SUMMARY_MAX_CHARS]
-        message = llm().invoke([("system", SUMMARY_PROMPT), ("human", f"Section: {section['title']}\n\n{text}")])
-        return message.content.strip()
+        messages = [("system", SUMMARY_PROMPT), ("human", f"Section: {section['title']}\n\n{text}")]
+        for _ in range(SUMMARY_ATTEMPTS):
+            try:
+                return llm().invoke(messages).content.strip()
+            except Exception:
+                pass
+        # A summary only helps tree search pick sections; the title still does that, less well, and one
+        # flaky call is no reason to fail a Document after its whole conversion
+        return section["title"]
 
     # One independent LLM call per section, so they run together; map() keeps document order
     with ThreadPoolExecutor(max_workers=settings.llm_concurrency) as pool:
-        for done, (section, summary) in enumerate(zip(sections, pool.map(summarize, sections)), start=1):
-            section["summary"] = summary
-            if on_progress:
-                on_progress(done, len(sections))
+        summaries = pool.map(summarize, sections)
+        try:
+            for done, (section, summary) in enumerate(zip(sections, summaries), start=1):
+                section["summary"] = summary
+                if on_progress:
+                    on_progress(done, len(sections))
+        finally:
+            summaries.close()  # a raise in on_progress (Document deleted) cancels sections not yet started
 
 
 def store_tree(file_id: str, sections: list[dict], chunk_section: dict[str, str]) -> None:

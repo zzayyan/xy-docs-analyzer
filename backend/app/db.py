@@ -9,11 +9,17 @@ SCHEMA = [
     "CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE",
     "CREATE CONSTRAINT section_id IF NOT EXISTS FOR (s:Section) REQUIRE s.id IS UNIQUE",
     "CREATE CONSTRAINT turn_id IF NOT EXISTS FOR (t:Turn) REQUIRE t.id IS UNIQUE",
-    "CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS FOR (c:Chunk) ON c.embedding "
-    f"OPTIONS {{indexConfig: {{`vector.dimensions`: {settings.embed_dim}, "
-    "`vector.similarity_function`: 'cosine'}}",
+    # Vector search scores a file's own chunks exactly (app/retrieval/vector.py), so the old global
+    # vector index only costs writes; dropped here once for databases that still have it
+    "DROP INDEX chunk_embedding IF EXISTS",
     "CREATE FULLTEXT INDEX chunk_text IF NOT EXISTS FOR (c:Chunk) ON EACH [c.text]",
     "CREATE INDEX entity_key IF NOT EXISTS FOR (e:__Entity__) ON (e.file_id, e.key)",
+    # Every per-document read and the cascade delete match on file_id; without these each is a scan of
+    # that label across every document in the database
+    "CREATE INDEX chunk_file IF NOT EXISTS FOR (c:Chunk) ON (c.file_id)",
+    "CREATE INDEX section_file IF NOT EXISTS FOR (s:Section) ON (s.file_id)",
+    "CREATE INDEX turn_file IF NOT EXISTS FOR (t:Turn) ON (t.file_id)",
+    "CREATE INDEX table_file IF NOT EXISTS FOR (e:TableExtraction) ON (e.file_id)",
     "CREATE FULLTEXT INDEX entity_name IF NOT EXISTS FOR (e:__Entity__) ON EACH [e.name]",
 ]
 
@@ -27,8 +33,7 @@ RESET_MESSAGE = (
     "Neo4j holds {chunks} chunks embedded with {old} ({old_dim} dims), but the config uses {new} ({new_dim} dims). "
     "Vectors from different models are not comparable, so search would silently return nonsense. "
     "Set the provider back, or re-ingest the documents after running in Neo4j: "
-    "MATCH (c:Chunk) DETACH DELETE c; DROP INDEX chunk_embedding IF EXISTS; "
-    "MATCH (m:Meta {{key: 'embedding'}}) DELETE m"
+    "MATCH (c:Chunk) DETACH DELETE c; MATCH (m:Meta {{key: 'embedding'}}) DELETE m"
 )
 
 
@@ -54,12 +59,11 @@ def check_embedding_model(g: Neo4jGraph) -> None:
             new=settings.embed_model, new_dim=settings.embed_dim,
         ))
 
-    # Nothing embedded yet, so adopt the new model and let SCHEMA rebuild the index at its dimension
+    # Nothing embedded yet, so adopt the new model
     g.query(
         "MATCH (m:Meta {key: 'embedding'}) SET m.model = $model, m.dim = $dim",
         {"model": settings.embed_model, "dim": settings.embed_dim},
     )
-    g.query("DROP INDEX chunk_embedding IF EXISTS")
 
 
 @lru_cache

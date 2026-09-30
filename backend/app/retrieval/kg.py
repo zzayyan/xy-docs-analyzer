@@ -52,7 +52,8 @@ def search(
 ) -> tuple[list[str], list[dict]]:
     """Return (graph facts as text lines, chunks that mention the matched entities)."""
     extracted = llm(model).with_structured_output(QuestionEntities).invoke([("system", SYSTEM_PROMPT), ("human", question)])
-    names = [name for name in (LUCENE_SPECIAL.sub(" ", n).strip() for n in extracted.names) if name]
+    # Lowercased so an uppercase AND/OR/NOT inside a name is a word, not a Lucene operator
+    names = [name for name in (LUCENE_SPECIAL.sub(" ", n).strip().lower() for n in extracted.names) if name]
     if not names:
         return [], []
 

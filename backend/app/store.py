@@ -13,16 +13,18 @@ ORDER BY coalesce(f.created_at, 0) DESC
 
 GET_FILE = "MATCH (f:File {id: $id}) RETURN f {.*} AS file"
 
-# Every deletion below is scoped by the file_id property, not by traversal, so execution order does not
-# matter and a document deleted mid-ingest cannot leave orphaned nodes behind. Meta is never touched: it
-# is global (the active embedding model marker), not per-document.
+# The File goes first: every write that creates nodes is anchored on MATCH (f:File) or on a Chunk deleted
+# further down, so once the File is gone an ingest still running writes nothing new, and the statements
+# after it (scoped by file_id, not traversal) sweep whatever it wrote before. File last would leave a
+# window where chunks written between the Chunk and File statements survive, orphaned. Meta is never
+# touched: it is global (the active embedding model marker), not per-document.
 DELETE_FILE_CASCADE = [
+    "MATCH (f:File {id: $id}) DETACH DELETE f",
     "MATCH (n:Chunk {file_id: $id}) DETACH DELETE n",
     "MATCH (n:Section {file_id: $id}) DETACH DELETE n",
     "MATCH (n:__Entity__ {file_id: $id}) DETACH DELETE n",
     "MATCH (n:Turn {file_id: $id}) DETACH DELETE n",
     "MATCH (n:TableExtraction {file_id: $id}) DETACH DELETE n",
-    "MATCH (f:File {id: $id}) DETACH DELETE f",
 ]
 
 LIST_SECTIONS = """
@@ -62,6 +64,12 @@ CREATE (f)-[:HAS_TABLE]->(:TableExtraction {
 
 SET_TABLE_EXTRACTION = "MATCH (e:TableExtraction {id: $id}) SET e += $props, e.updated_at = timestamp()"
 
+# A run's own final write: a cancel that landed while the run was merging rows stays cancelled
+FINISH_TABLE_EXTRACTION = """
+MATCH (e:TableExtraction {id: $id}) WHERE e.status = 'running'
+SET e += $props, e.updated_at = timestamp()
+"""
+
 # Rows are left out on purpose: the list is a history sidebar, and a document's rows can run to
 # thousands of chunk quotes each. Open one to get its rows, through GET_TABLE_EXTRACTION.
 LIST_TABLE_EXTRACTIONS = """
@@ -82,6 +90,15 @@ RETURN t.id AS id, t.question AS question, t.answer AS answer, t.citations AS ci
 ORDER BY t.created_at
 """
 
+# What a new question needs of the conversation so far: the latest complete turns, text only -- not every
+# Turn with its citations (chunk text included) re-read and decoded on every question.
+RECENT_TURNS = """
+MATCH (t:Turn {file_id: $file_id}) WHERE t.complete
+WITH t ORDER BY t.created_at DESC LIMIT $n
+RETURN t.question AS question, t.answer AS answer
+ORDER BY t.created_at
+"""
+
 SAVE_TURN = """
 MATCH (f:File {id: $file_id})
 CREATE (f)-[:HAS_TURN]->(:Turn {
@@ -91,6 +108,20 @@ CREATE (f)-[:HAS_TURN]->(:Turn {
 """
 
 CLEAR_TURNS = "MATCH (t:Turn {file_id: $file_id}) DETACH DELETE t"
+
+
+FAIL_INTERRUPTED = [
+    "MATCH (f:File) WHERE NOT f.status IN ['done', 'error'] SET f.status = 'error', f.error = $error, f.updated_at = timestamp()",
+    "MATCH (e:TableExtraction) WHERE e.status IN ['queued', 'running'] "
+    "SET e.status = 'error', e.error = $error, e.updated_at = timestamp()",
+]
+
+
+def fail_interrupted(error: str) -> None:
+    """Marks every unfinished ingest and Table Extraction as failed. Only right at startup, before any
+    background task of this process has begun: nothing else can be running then."""
+    for statement in FAIL_INTERRUPTED:
+        graph().query(statement, {"error": error})
 
 
 def list_files() -> list[dict]:
@@ -122,26 +153,24 @@ def list_turns(file_id: str) -> list[dict]:
     return turns
 
 
+def recent_turns(file_id: str, n: int) -> list[dict]:
+    """The last n complete turns, oldest first, as {question, answer}."""
+    return graph().query(RECENT_TURNS, {"file_id": file_id, "n": n})
+
+
 def save_turn(
     file_id: str, *, question: str, answer: str, citations: list[dict], mode: str, complete: bool,
-    turn_id: str | None = None,
-) -> dict:
+    turn_id: str,
+) -> None:
     """Anchored on MATCH (f:File ...): if the document was deleted mid-answer this is a silent no-op
     rather than an orphaned Turn. Citations are JSON-encoded because Neo4j properties cannot hold a
     list of maps, and are stored denormalised (including chunk text) so history survives re-ingestion
-    or a chunk being deleted later.
-
-    turn_id can be supplied by the caller (the streaming endpoint mints it up front so it can be
-    sent in the SSE "done" event, before the turn is actually written in a finally block)."""
-    turn_id = turn_id or str(uuid.uuid4())
+    or a chunk being deleted later. turn_id is minted by the streaming endpoint, which sends it in the
+    SSE "done" event."""
     graph().query(SAVE_TURN, {
         "id": turn_id, "file_id": file_id, "question": question, "answer": answer,
         "citations": json.dumps(citations), "mode": mode, "complete": complete,
     })
-    return {
-        "id": turn_id, "question": question, "answer": answer, "citations": citations,
-        "mode": mode, "complete": complete,
-    }
 
 
 def clear_turns(file_id: str) -> None:
@@ -174,10 +203,11 @@ def create_table_extraction(file_id: str, request: str, columns: list[dict]) -> 
     return get_table_extraction(file_id, extraction_id)
 
 
-def set_table_extraction(extraction_id: str, **props) -> None:
+def set_table_extraction(extraction_id: str, *, when_running: bool = False, **props) -> None:
     if "rows" in props:
         props["rows"] = json.dumps(props["rows"])
-    graph().query(SET_TABLE_EXTRACTION, {"id": extraction_id, "props": props})
+    statement = FINISH_TABLE_EXTRACTION if when_running else SET_TABLE_EXTRACTION
+    graph().query(statement, {"id": extraction_id, "props": props})
 
 
 def list_table_extractions(file_id: str) -> list[dict]:
