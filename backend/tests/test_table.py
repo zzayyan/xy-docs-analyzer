@@ -55,8 +55,22 @@ def test_every_chunk_is_read_once_in_order_and_rows_cite_their_chunk(monkeypatch
     assert progress == [(i, 8) for i in range(1, 9)]
     assert rows[0] == {
         "values": {"Kewajiban": "item 0", "Tenggat": "2027"},
-        "citations": [{"n": 1, "chunk_id": "f:0", "pages": [0], "headings": ["Bab 0"], "source": "table", "text": "text 0"}],
+        "citations": [{
+            "n": 1, "chunk_id": "f:0", "pages": [0], "headings": ["Bab 0"], "regions": [],
+            "source": "table", "text": "text 0",
+        }],
     }
+
+
+def test_a_chunk_with_regions_gives_its_row_a_highlight(monkeypatch, chunks):
+    region = {"page": 1, "l": 0, "t": 0, "r": 10, "b": 10, "page_width": 600, "page_height": 800}
+    with_regions = [{**c, "regions": [region]} if c["id"] == "f:0" else c for c in chunks]
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model: fake_rows([["item", "2027"]]))
+
+    rows = table.run(with_regions, COLUMNS, model=None)
+
+    assert rows[0]["citations"][0]["regions"] == [region]
+    assert rows[1]["citations"][0]["regions"] == [], "a chunk with no regions cites with none"
 
 
 def test_a_value_the_document_does_not_state_stays_empty(monkeypatch, chunks):

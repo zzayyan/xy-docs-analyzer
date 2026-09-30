@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from app import store, table
 from app.config import settings
 from app.graph import to_citations, workflow
-from app.ingest.convert import page_count
+from app.ingest.convert import page_count, render_page
 from app.ingest.pipeline import create_file, ingest, set_status
 from app.table import Column, Stopped, document_context, propose_columns, suggest_tables
 from app.table import run as run_table
@@ -103,6 +103,18 @@ class TableRequest(BaseModel):
     columns: list[Column]
 
 
+class Region(BaseModel):
+    """One bounding box on one page of the Original -- what gets drawn as a Highlight."""
+
+    page: int
+    l: float
+    t: float
+    r: float
+    b: float
+    page_width: float
+    page_height: float
+
+
 class Citation(BaseModel):
     n: int
     chunk_id: str
@@ -110,6 +122,7 @@ class Citation(BaseModel):
     headings: list[str]
     source: str
     text: str
+    regions: list[Region] = []
 
 
 class ChatResponse(BaseModel):
@@ -257,6 +270,22 @@ def document_original(doc_id: str) -> FileResponse:
     # uploaded page can never run script on the API's origin.
     disposition = "inline" if media_type == "application/pdf" else "attachment"
     return FileResponse(path, media_type=media_type, filename=file["name"], content_disposition_type=disposition)
+
+
+@app.get("/documents/{doc_id}/original/pages/{page_no}")
+def document_original_page(doc_id: str, page_no: int) -> Response:
+    """A rendered page of a PDF Original, for the citation panel's Highlight view."""
+    get_file(doc_id)
+    path = original_path(doc_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="original not kept for this document")
+    if mimetypes.guess_type(path)[0] != "application/pdf":
+        raise HTTPException(status_code=404, detail="original is not a PDF")
+    png = render_page(path, page_no)
+    if png is None:
+        raise HTTPException(status_code=404, detail="page not found")
+    # An Original never changes once kept, and doc_id is a fresh id per upload, so this is safe forever
+    return Response(png, media_type="image/png", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @app.delete("/documents/{doc_id}", status_code=204)

@@ -208,7 +208,7 @@ export function TablePanel({ docId }: { docId: string }) {
         </div>
       </div>
 
-      {selected && <SourcePanel citation={selected.citation} onClose={() => setSelected(null)} />}
+      {selected && <SourcePanel docId={docId} citation={selected.citation} onClose={() => setSelected(null)} />}
 
       <ConfirmDialog
         open={confirmDelete}

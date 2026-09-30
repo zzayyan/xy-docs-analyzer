@@ -8,14 +8,14 @@ LUCENE_SPECIAL = re.compile(r'[+\-&|!(){}\[\]^"~*?:\\/]')
 VECTOR_QUERY = """
 CALL db.index.vector.queryNodes('chunk_embedding', $candidates, $vector) YIELD node, score
 WHERE node.file_id = $file_id
-RETURN node.id AS id, node.text AS text, node.pages AS pages, node.headings AS headings
+RETURN node.id AS id, node.text AS text, node.pages AS pages, node.headings AS headings, node.regions AS regions
 LIMIT $k
 """
 
 KEYWORD_QUERY = """
 CALL db.index.fulltext.queryNodes('chunk_text', $text) YIELD node, score
 WHERE node.file_id = $file_id
-RETURN node.id AS id, node.text AS text, node.pages AS pages, node.headings AS headings
+RETURN node.id AS id, node.text AS text, node.pages AS pages, node.headings AS headings, node.regions AS regions
 LIMIT $k
 """
 

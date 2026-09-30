@@ -1,3 +1,4 @@
+import json
 import operator
 import re
 from typing import Annotated, TypedDict
@@ -87,24 +88,32 @@ def contextualize(state: State) -> dict:
     return {"search_query": rewritten or state["question"]}
 
 
+def _contexts(rows: list[dict], source: str) -> list[dict]:
+    """Tags each retrieved row with its source and decodes its regions -- a Neo4j property can't hold a
+    list of maps, so c.regions travels as JSON the same way Turn.citations does."""
+    return [{**row, "source": source, "regions": json.loads(row.get("regions") or "[]")} for row in rows]
+
+
 def vector_retrieve(state: State) -> dict:
     query = state.get("search_query") or state["question"]
-    return {"retrieved": [{**c, "source": "vector"} for c in vector.search(state["doc_id"], query)]}
+    return {"retrieved": _contexts(vector.search(state["doc_id"], query), "vector")}
 
 
 def tree_retrieve(state: State) -> dict:
     query = state.get("search_query") or state["question"]
     chunks = tree_search.search(state["doc_id"], query, model=state.get("model"))
-    return {"retrieved": [{**c, "source": "tree"} for c in chunks]}
+    return {"retrieved": _contexts(chunks, "tree")}
 
 
 def kg_retrieve(state: State) -> dict:
     query = state.get("search_query") or state["question"]
     facts, chunks = kg.search(state["doc_id"], query, model=state.get("model"))
-    retrieved = [{**c, "source": "kg"} for c in chunks]
+    retrieved = _contexts(chunks, "kg")
     if facts:
         text = "Knowledge graph facts:\n" + "\n".join(facts)
-        retrieved.insert(0, {"id": "kg:facts", "text": text, "pages": [], "headings": [], "source": "kg_facts"})
+        retrieved.insert(0, {
+            "id": "kg:facts", "text": text, "pages": [], "headings": [], "regions": [], "source": "kg_facts",
+        })
     return {"retrieved": retrieved}
 
 
@@ -133,6 +142,7 @@ def to_citations(contexts: list[dict]) -> list[dict]:
             "chunk_id": c["id"],
             "pages": c["pages"],
             "headings": c.get("headings") or [],
+            "regions": c.get("regions") or [],
             "source": c["source"],
             "text": c["text"],
         }

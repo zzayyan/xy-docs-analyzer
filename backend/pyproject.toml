@@ -15,6 +15,7 @@ dependencies = [
     "pydantic-settings",
     "langchain-openai>=1.6.2",
     "openpyxl>=3.1.5",
+    "pypdfium2",
 ]
 
 [dependency-groups]

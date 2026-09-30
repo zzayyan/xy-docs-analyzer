@@ -82,6 +82,9 @@ export interface Dict {
   citationSourceKgFacts: string;
   citationSourceTable: string;
   citationClose: string;
+  citationPageOf: (i: number, n: number) => string;
+  citationPrevPage: string;
+  citationNextPage: string;
 
   tabChat: string;
   tabOutline: string;
@@ -210,6 +213,9 @@ const en: Dict = {
   citationSourceKgFacts: 'Knowledge graph facts',
   citationSourceTable: 'Table extraction',
   citationClose: 'Close',
+  citationPageOf: (i, n) => `Page ${i} of ${n}`,
+  citationPrevPage: 'Previous page',
+  citationNextPage: 'Next page',
 
   tabChat: 'Chat',
   tabOutline: 'Outline',
@@ -338,6 +344,9 @@ const id: Dict = {
   citationSourceKgFacts: 'Fakta graf pengetahuan',
   citationSourceTable: 'Ekstraksi tabel',
   citationClose: 'Tutup',
+  citationPageOf: (i, n) => `Halaman ${i} dari ${n}`,
+  citationPrevPage: 'Halaman sebelumnya',
+  citationNextPage: 'Halaman berikutnya',
 
   tabChat: 'Chat',
   tabOutline: 'Daftar Isi',

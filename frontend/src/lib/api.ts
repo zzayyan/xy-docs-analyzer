@@ -40,6 +40,18 @@ export interface Document {
   has_original: boolean;
 }
 
+/** One bounding box on one page of the Original -- what gets drawn as a Highlight. Top-left origin,
+ * PDF points; page_width/page_height are the page's own size, so no separate lookup is needed to scale. */
+export interface Region {
+  page: number;
+  l: number;
+  t: number;
+  r: number;
+  b: number;
+  page_width: number;
+  page_height: number;
+}
+
 export interface Citation {
   n: number;
   chunk_id: string;
@@ -47,6 +59,7 @@ export interface Citation {
   headings: string[];
   source: 'vector' | 'tree' | 'kg' | 'kg_facts' | 'table';
   text: string;
+  regions: Region[];
 }
 
 export interface ChatResponse {
@@ -165,6 +178,8 @@ export const api = {
   },
 
   originalUrl: (id: string) => `${API_URL}/documents/${id}/original`,
+
+  pageImageUrl: (id: string, page: number) => `${API_URL}/documents/${id}/original/pages/${page}`,
 
   deleteDocument: (id: string) => request<void>(`/documents/${id}`, { method: 'DELETE' }),
 

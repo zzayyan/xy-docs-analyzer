@@ -42,7 +42,7 @@ ORDER BY c.idx
 
 ALL_CHUNKS = """
 MATCH (c:Chunk {file_id: $file_id})
-RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings
+RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings, c.regions AS regions
 ORDER BY c.idx
 """
 
@@ -149,9 +149,11 @@ def clear_turns(file_id: str) -> None:
 
 
 def list_chunks(file_id: str, limit: int | None = None) -> list[dict]:
-    if limit is None:
-        return graph().query(ALL_CHUNKS, {"file_id": file_id})
-    return graph().query(FIRST_CHUNKS, {"file_id": file_id, "limit": limit})
+    statement, params = (ALL_CHUNKS, {}) if limit is None else (FIRST_CHUNKS, {"limit": limit})
+    rows = graph().query(statement, {"file_id": file_id, **params})
+    # A chunk written before Highlights shipped has no regions property -- Neo4j returns None for it,
+    # which means "no Highlight" the same way an empty list does.
+    return [{**row, "regions": json.loads(row.get("regions") or "[]")} for row in rows]
 
 
 def _table_extraction(row: dict) -> dict:

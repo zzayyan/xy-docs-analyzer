@@ -1,3 +1,4 @@
+import json
 import uuid
 
 from app.config import settings
@@ -43,14 +44,18 @@ def ingest(file_id: str, path: str) -> None:
         )
 
         vectors = embeddings().embed_documents([c["text"] for c in chunks])
-        rows = [{**c, "id": f"{file_id}:{c['idx']}", "embedding": v} for c, v in zip(chunks, vectors)]
+        rows = [{
+            **c, "id": f"{file_id}:{c['idx']}", "embedding": v,
+            # A Neo4j property can't hold a list of maps, the same reason Turn.citations is JSON too
+            "regions": json.dumps(c["regions"]),
+        } for c, v in zip(chunks, vectors)]
         graph().query(
             """
             MATCH (f:File {id: $file_id})
             UNWIND $rows AS r
             MERGE (c:Chunk {id: r.id})
             SET c.text = r.text, c.idx = r.idx, c.pages = r.pages, c.headings = r.headings,
-                c.file_id = $file_id, c.embedding = r.embedding
+                c.regions = r.regions, c.file_id = $file_id, c.embedding = r.embedding
             MERGE (c)-[:PART_OF]->(f)
             """,
             {"file_id": file_id, "rows": rows},

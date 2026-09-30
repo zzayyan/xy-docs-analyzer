@@ -65,7 +65,7 @@ def test_propose_returns_columns_and_stores_nothing(stubbed, monkeypatch):
 
 def test_create_runs_the_extraction_in_the_background_and_saves_its_rows(stubbed, monkeypatch):
     rows = [{"values": {"Kewajiban": "bayar"}, "citations": [
-        {"n": 1, "chunk_id": "f:0", "pages": [1], "headings": [], "source": "table", "text": "text"},
+        {"n": 1, "chunk_id": "f:0", "pages": [1], "headings": [], "regions": [], "source": "table", "text": "text"},
     ]}]
     monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop: rows)
 

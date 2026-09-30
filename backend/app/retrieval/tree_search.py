@@ -17,7 +17,7 @@ CHUNKS_QUERY = """
 UNWIND range(0, size($section_ids) - 1) AS rank
 MATCH (s:Section {id: $section_ids[rank]})-[:HAS_CHILD*0..]->(:Section)<-[:IN_SECTION]-(c:Chunk)
 WITH c, min(rank) AS rank
-RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings
+RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings, c.regions AS regions
 ORDER BY rank, c.idx
 LIMIT $limit
 """

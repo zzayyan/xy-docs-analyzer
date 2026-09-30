@@ -58,6 +58,11 @@ _Avoid_: Source, reference
 The visible mark over the cited passage on a page of the original.
 _Avoid_: Annotation, selection
 
+**Region**:
+One bounding box on one page of the Original that a chunk came from; a citation's regions are what
+get marked as Highlights.
+_Avoid_: Box, bbox, span
+
 ## Table Extraction
 
 **Table Extraction**:

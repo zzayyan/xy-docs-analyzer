@@ -247,7 +247,8 @@ def run(
                 raise Stopped()
             citation = {
                 "n": 1, "chunk_id": chunk["id"], "pages": chunk["pages"],
-                "headings": chunk.get("headings") or [], "source": "table", "text": chunk["text"],
+                "headings": chunk.get("headings") or [], "regions": chunk.get("regions") or [],
+                "source": "table", "text": chunk["text"],
             }
             for row in found.rows:
                 # The model can return fewer values than there are columns; a column it skipped is

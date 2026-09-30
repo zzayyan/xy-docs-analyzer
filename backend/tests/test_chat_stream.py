@@ -137,3 +137,21 @@ def test_unknown_document_returns_404_before_streaming_starts(monkeypatch):
     monkeypatch.setattr(store_module, "get_file", lambda doc_id: None)
     r = client.get("/chat/stream", params={"doc_id": "nope", "question": "hi?"})
     assert r.status_code == 404
+
+
+def test_citations_event_carries_regions_when_present_and_empty_when_not(stubbed, monkeypatch):
+    region = {"page": 1, "l": 0, "t": 0, "r": 10, "b": 10, "page_width": 600, "page_height": 800}
+
+    async def fake_stream(state, stream_mode):
+        yield ("updates", {"fuse": {"contexts": [
+            {"id": "f:0", "text": "has a highlight", "pages": [1], "headings": [], "regions": [region], "source": "vector"},
+            {"id": "f:1", "text": "no highlight", "pages": [2], "headings": [], "regions": [], "source": "vector"},
+        ]}})
+
+    monkeypatch.setattr(api_module.workflow, "astream", fake_stream)
+
+    with client.stream("GET", "/chat/stream", params={"doc_id": "d1", "question": "hi?"}) as r:
+        events = parse_sse(r.read().decode())
+
+    [(_, citations)] = [(e, d) for e, d in events if e == "citations"]
+    assert [c["regions"] for c in citations] == [[region], []]
