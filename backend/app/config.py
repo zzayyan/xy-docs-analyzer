@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     # llm_api_key above -- this offers model *names*, not a second provider.
     llm_model_choices: str = ""
 
+    # Table Extraction's own model, when TABLE_LLM_MODEL is set: any OpenAI-compatible endpoint (NVIDIA's,
+    # say). Column proposals, suggestions, the per-chunk read and the merge all use it; chat and ingest keep
+    # the model above. Unset, tables use the document's model like everything else.
+    table_llm_base_url: str = ""
+    table_llm_api_key: str = ""
+    table_llm_model: str = ""
+    # Output cap per table call on that model; reasoning models think before answering, so it is generous
+    table_llm_max_tokens: int = 8000
+
     embed_provider: Provider = "ollama"
     embed_base_url: str = "http://localhost:11434"
     embed_api_key: str = ""

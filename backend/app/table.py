@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.models import llm
+from app.models import llm, table_llm
 
 # A chunk is at most CHUNK_MAX_TOKENS long, so its rows cannot honestly need more output than this.
 # The cap is what makes a runaway cost seconds instead of minutes (measured: 7s against 110s).
@@ -20,6 +20,13 @@ EXTRACT_MAX_TOKENS = 3000
 RETRY_TEMPERATURE = 0.7
 # The merge pass answers with row numbers only, so its output is small even for a long table.
 MERGE_MAX_TOKENS = 2000
+# The scope pass answers with part numbers only. Each part is a run of chunks under one heading, shown
+# as its heading plus how it begins; past SCOPE_MAX_PARTS the listing no longer fits a small model's
+# context, so the whole document is read instead.
+# ponytail: all-or-nothing past the cap; scope a long document section by section if that bites.
+SCOPE_MAX_TOKENS = 1000
+SCOPE_MAX_PARTS = 200
+SCOPE_PREVIEW_CHARS = 120
 # Two values of one column describe the same thing when they share more than this share of their
 # words. Deliberately above one half: "menyerahkan laporan bulanan" and "menyerahkan laporan tahunan"
 # share exactly half and are different obligations, so a paraphrase that also shares only half
@@ -52,11 +59,22 @@ SUGGEST_SYSTEM = (
 )
 
 EXTRACT_SYSTEM = (
-    "You extract table rows from one passage of a document. Return one row per item in the passage "
-    "that matches the columns, and no rows at all if the passage has none. Give one value per column, "
-    "in the order the columns are listed. Quote each value exactly as the passage writes it, in the "
-    "language of the passage -- do not translate, summarise or infer. Leave a value empty when the "
-    "passage does not state it."
+    "You extract table rows from one passage of a document, for a request. Return one row per item in "
+    "the passage that the request asks for, and no rows at all if the passage has none. Something that "
+    "only looks like such an item -- a heading, a menu entry, an example of something else -- is not "
+    "one. Give one value per column, in the order the columns are listed. Quote each value exactly as "
+    "the passage writes it, in the language of the passage -- do not translate, summarise or infer. "
+    "Leave a value empty when the passage does not state it; never fill it with a guess or with words "
+    "like \"not stated\"."
+)
+
+SCOPE_SYSTEM = (
+    "You decide which parts of a document a table has to be read from. You get the request for the "
+    "table and the document's parts, numbered, each with its heading and how it begins. Return the "
+    "numbers of every part that could state an item the request asks for. Leave out parts that only "
+    "mention such items in passing, as examples of something else, or in a list that answers a "
+    "different question. When the request asks for every item of its kind anywhere in the document, "
+    "or you cannot tell, return every part."
 )
 
 MERGE_SYSTEM = (
@@ -95,6 +113,10 @@ class DuplicateGroups(BaseModel):
     groups: list[list[int]] = Field(description="Row numbers that describe the same item, one list per item")
 
 
+class ScopedParts(BaseModel):
+    parts: list[int] = Field(description="Numbers of the parts to read")
+
+
 class ExtractedRow(BaseModel):
     values: list[str] = Field(description="One value per column, in the order the columns are listed")
 
@@ -119,11 +141,22 @@ def document_context(sections: list[dict], chunks: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+def chat(model: str | None, **options):
+    """The model every table call goes to: TABLE_LLM_MODEL when configured, else the document's own.
+    options are llm()'s temperature and max_tokens."""
+    if settings.table_llm_model:
+        # The output caps above were measured on a model that answers directly. A table model that reasons
+        # first spends most of them thinking (Nemotron-3-Super: 2700 tokens on a 500-token chunk), so it
+        # gets its own, larger cap instead.
+        return table_llm(**{**options, "max_tokens": settings.table_llm_max_tokens})
+    return llm(model, **options)
+
+
 def propose_columns(request: str, model: str | None = None, context: str = "") -> list[dict]:
     """context is the document the columns are for (see document_context); without it the model is
     guessing names from the request's wording alone."""
     described = f"{context}\n\nRequest:\n{request}" if context else request
-    proposed = llm(model).with_structured_output(ProposedColumns).invoke([
+    proposed = chat(model).with_structured_output(ProposedColumns).invoke([
         ("system", PROPOSE_SYSTEM),
         ("human", described),
     ])
@@ -132,7 +165,7 @@ def propose_columns(request: str, model: str | None = None, context: str = "") -
 
 def suggest_tables(context: str, model: str | None = None) -> list[dict]:
     """Tables worth extracting from this document, for a user who has not typed a request yet."""
-    suggested = llm(model).with_structured_output(SuggestedTables).invoke([
+    suggested = chat(model).with_structured_output(SuggestedTables).invoke([
         ("system", SUGGEST_SYSTEM),
         ("human", context),
     ])
@@ -142,19 +175,72 @@ def suggest_tables(context: str, model: str | None = None) -> list[dict]:
 def read_structured(schema: type[BaseModel], messages: list, model: str | None, max_tokens: int) -> BaseModel:
     """Read once greedily, then once more off-greedy if that read runs away (see docs/adr/0001)."""
     try:
-        return llm(model, max_tokens=max_tokens).with_structured_output(schema).invoke(messages)
+        return chat(model, max_tokens=max_tokens).with_structured_output(schema).invoke(messages)
     except Exception:
-        return llm(
+        return chat(
             model, temperature=RETRY_TEMPERATURE, max_tokens=max_tokens,
         ).with_structured_output(schema).invoke(messages)
 
 
-def extract_one(text: str, columns: list[dict], model: str | None) -> ChunkRows:
+def parts_of(chunks: list[dict]) -> list[list[dict]]:
+    """Consecutive chunks under the same headings, in document order: the units scope() chooses between."""
+    parts: list[list[dict]] = []
+    for chunk in chunks:
+        if parts and (parts[-1][0].get("headings") or []) == (chunk.get("headings") or []):
+            parts[-1].append(chunk)
+        else:
+            parts.append([chunk])
+    return parts
+
+
+def scope(request: str, chunks: list[dict], model: str | None) -> list[dict]:
+    """The chunks a table has to be read from, chosen once with the whole document in view.
+
+    Each chunk is otherwise read on its own, and on its own a passage listing regulations as examples of
+    a website's catalogue looks exactly like one listing a law's legal basis (measured on a 46-chunk
+    document: 73 rows where 5 answered the request, on a 120B model as on a 4B one). Seeing every part's
+    heading side by side is what tells them apart. Anything short of a usable answer -- a failed call, no
+    valid part, too many parts to show -- reads the whole document: a table that reads too much is noisy,
+    one that reads too little silently misses rows (see docs/adr/0004)."""
+    parts = parts_of(chunks)
+    if len(parts) < 2 or len(parts) > SCOPE_MAX_PARTS:
+        return chunks
+    lines = []
+    for i, part in enumerate(parts, start=1):
+        heading = " / ".join(part[0].get("headings") or []) or "(no heading)"
+        opening = " ".join(part[0]["text"].split())
+        opening = opening.removeprefix(" ".join(heading.split(" / ")).strip()).strip()
+        lines.append(f"{i}. {heading[:CONTEXT_SECTION_CHARS]} -- {opening[:SCOPE_PREVIEW_CHARS]}")
+    messages = [("system", SCOPE_SYSTEM), ("human", f"Request:\n{request}\n\nParts:\n" + "\n".join(lines))]
+    try:
+        chosen = read_structured(ScopedParts, messages, model, SCOPE_MAX_TOKENS).parts
+    except Exception:
+        return chunks
+    picked = {i for i in chosen if 1 <= i <= len(parts)}
+    if not picked:
+        return chunks
+    return [chunk for i, part in enumerate(parts, start=1) if i in picked for chunk in part]
+
+
+def extract_one(text: str, columns: list[dict], model: str | None, request: str) -> ChunkRows:
     """One LLM call, no database access, so it is safe to run many at once. The off-greedy second read
-    is what keeps one awkward passage from costing a whole document its table."""
+    is what keeps one awkward passage from costing a whole document its table.
+
+    The request goes in with the columns: the columns alone say what a row looks like, not which items
+    belong, so without it every list in the document that fits the columns came back as rows."""
     listed = "\n".join(f"{i}. {c['name']}: {c['description']}" for i, c in enumerate(columns, start=1))
-    messages = [("system", EXTRACT_SYSTEM), ("human", f"Columns:\n{listed}\n\nPassage:\n{text}")]
+    asked = f"Request:\n{request}\n\n" if request else ""
+    messages = [("system", EXTRACT_SYSTEM), ("human", f"{asked}Columns:\n{listed}\n\nPassage:\n{text}")]
     return read_structured(ChunkRows, messages, model, EXTRACT_MAX_TOKENS)
+
+
+def quoted(value: str, text: str) -> bool:
+    """Whether the passage states this value, word for word. Compared as words, ignoring case and
+    punctuation, so a quote the model re-spaced or re-punctuated still counts; a value the passage never
+    says ("masih berlaku" for a status it does not give, "tidak disebutkan", a list item's number read as
+    a document number) does not."""
+    words = " ".join(WORD.findall(value.lower()))
+    return bool(words) and f" {words} " in f" {' '.join(WORD.findall(text.lower()))} "
 
 
 def find_duplicates(rows: list[dict], columns: list[dict], model: str | None) -> list[list[int]]:
@@ -226,20 +312,26 @@ def run(
     chunks: list[dict], columns: list[dict], model: str | None = None,
     on_progress: Callable[[int, int], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
+    request: str = "",
 ) -> list[dict]:
     """Read every chunk and return the rows found, each citing the chunk it came from.
 
     Rows keep chunk order, and a chunk the model fails on fails the whole run: a partial table would
     silently claim to cover the whole document. should_stop is asked before each chunk's rows are
-    taken, and raises Stopped -- that is how a user cancels a run that has minutes left. Merging items
-    found in more than one chunk is a separate ticket, so one item mentioned twice is still two rows
-    here."""
+    taken, and raises Stopped -- that is how a user cancels a run that has minutes left. Items found in
+    more than one chunk are merged at the end (merge_rows).
+
+    A value the chunk does not state word for word is blanked (see quoted), and a row left with no
+    value at all is dropped: measured on Qwen3.5-4B, a status the passage never gives was filled in on
+    nearly every row, and headings came back as rows of blanks."""
+    if request:
+        chunks = scope(request, chunks, model)
     rows: list[dict] = []
     # One HTTP call per chunk, so it parallelises; map() keeps chunk order however the calls
     # interleave. Closing its iterator (on Stopped, or on a chunk the model failed twice on) cancels
     # every chunk not yet started, so neither cancelling nor failing pays for the rest of the document.
     with ThreadPoolExecutor(max_workers=settings.llm_concurrency) as pool:
-        extracted = pool.map(lambda chunk: extract_one(chunk["text"], columns, model), chunks)
+        extracted = pool.map(lambda chunk: extract_one(chunk["text"], columns, model, request), chunks)
 
         for done, (chunk, found) in enumerate(zip(chunks, extracted), start=1):
             if should_stop and should_stop():
@@ -253,7 +345,9 @@ def run(
             for row in found.rows:
                 # The model can return fewer values than there are columns; a column it skipped is
                 # a value the document does not state, which is an empty cell rather than a shift.
-                values = [v.strip() for v in row.values] + [""] * len(columns)
+                values = [v.strip() if quoted(v, chunk["text"]) else "" for v in row.values] + [""] * len(columns)
+                if not any(values[:len(columns)]):
+                    continue
                 rows.append({
                     "values": {c["name"]: v for c, v in zip(columns, values)},
                     "citations": [dict(citation)],

@@ -311,7 +311,7 @@ def document_section_chunks(doc_id: str, section_id: str) -> list[dict]:
     return store.section_chunks(doc_id, section_id)
 
 
-def extract_table(doc_id: str, table_id: str, columns: list[dict], model: str | None) -> None:
+def extract_table(doc_id: str, table_id: str, request: str, columns: list[dict], model: str | None) -> None:
     """The run itself, as a background task: minutes of LLM calls over every chunk, with its progress
     and its outcome kept on the TableExtraction so the user can leave the tab and come back.
 
@@ -328,11 +328,13 @@ def extract_table(doc_id: str, table_id: str, columns: list[dict], model: str | 
     try:
         chunks = store.list_chunks(doc_id)
         store.set_table_extraction(table_id, status="running", chunks_done=0, chunks_total=len(chunks))
-        rows = run_table(chunks, columns, model, on_progress=progress, should_stop=cancelled)
+        rows = run_table(chunks, columns, model, on_progress=progress, should_stop=cancelled, request=request)
         store.set_table_extraction(
             # A row's id is its position when the run finished; deleting a row never renumbers the rest
+            # chunks_done/chunks_total stay as the last progress call left them: the chunks actually read,
+            # which is fewer than the document's when the run was scoped to part of it
             table_id, status="done", progress=1.0, rows=[{**row, "id": str(i)} for i, row in enumerate(rows)],
-            chunks_done=len(chunks), chunks_total=len(chunks), when_running=True,
+            when_running=True,
         )
     except Stopped:
         # The user asked for this, so it is not an error and keeps no half-done rows
@@ -395,7 +397,7 @@ def create_table_extraction(doc_id: str, body: TableRequest, background: Backgro
     if any(e["status"] in IN_FLIGHT for e in store.list_table_extractions(doc_id)):
         raise HTTPException(status_code=409, detail="a table extraction is already running for this document")
     extraction = store.create_table_extraction(doc_id, body.request, columns)
-    background.add_task(extract_table, doc_id, extraction["id"], columns, file.get("llm_model"))
+    background.add_task(extract_table, doc_id, extraction["id"], body.request, columns, file.get("llm_model"))
     return extraction
 
 

@@ -18,6 +18,12 @@ COLUMNS = [
 
 
 @pytest.fixture(autouse=True)
+def document_model(monkeypatch):
+    """Every test fakes table.llm; a TABLE_LLM_MODEL in the developer's .env must not route around it."""
+    monkeypatch.setattr(settings, "table_llm_model", "")
+
+
+@pytest.fixture(autouse=True)
 def no_duplicates(monkeypatch):
     """The merge pass is one more model call; tests that are not about merging find no duplicates, so
     they never reach a real model. Merge tests replace this with their own answer."""
@@ -26,7 +32,9 @@ def no_duplicates(monkeypatch):
 
 @pytest.fixture
 def chunks():
-    return [{"id": f"f:{i}", "text": f"text {i}", "pages": [i], "headings": [f"Bab {i}"]} for i in range(8)]
+    # Every value the fakes below return is quoted from this text, as a real model's must be
+    return [{"id": f"f:{i}", "text": f"text {i}: item {i}, item, other, bayar, lapor 10 Mei, 31 Jan 2027", "pages": [i],
+             "headings": [f"Bab {i}"]} for i in range(8)]
 
 
 def fake_rows(values: list[list[str]]):
@@ -36,10 +44,10 @@ def fake_rows(values: list[list[str]]):
 def test_every_chunk_is_read_once_in_order_and_rows_cite_their_chunk(monkeypatch, chunks):
     threads: set[int] = set()
 
-    def slow_extract(text, columns, model):
+    def slow_extract(text, columns, model, request):
         threads.add(threading.get_ident())
         time.sleep(0.2)
-        return fake_rows([[f"item {text[-1]}", "2027"]])
+        return fake_rows([[f"item {text.split(':')[0][-1]}", "2027"]])
 
     monkeypatch.setattr(settings, "llm_concurrency", 4)
     monkeypatch.setattr(table, "extract_one", slow_extract)
@@ -57,7 +65,7 @@ def test_every_chunk_is_read_once_in_order_and_rows_cite_their_chunk(monkeypatch
         "values": {"Kewajiban": "item 0", "Tenggat": "2027"},
         "citations": [{
             "n": 1, "chunk_id": "f:0", "pages": [0], "headings": ["Bab 0"], "regions": [],
-            "source": "table", "text": "text 0",
+            "source": "table", "text": chunks[0]["text"],
         }],
     }
 
@@ -65,7 +73,7 @@ def test_every_chunk_is_read_once_in_order_and_rows_cite_their_chunk(monkeypatch
 def test_a_chunk_with_regions_gives_its_row_a_highlight(monkeypatch, chunks):
     region = {"page": 1, "l": 0, "t": 0, "r": 10, "b": 10, "page_width": 600, "page_height": 800}
     with_regions = [{**c, "regions": [region]} if c["id"] == "f:0" else c for c in chunks]
-    monkeypatch.setattr(table, "extract_one", lambda text, columns, model: fake_rows([["item", "2027"]]))
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model, request: fake_rows([["item", "2027"]]))
 
     rows = table.run(with_regions, COLUMNS, model=None)
 
@@ -75,7 +83,7 @@ def test_a_chunk_with_regions_gives_its_row_a_highlight(monkeypatch, chunks):
 
 def test_a_value_the_document_does_not_state_stays_empty(monkeypatch, chunks):
     # The model returns only the first column for one row, and a blank for the other
-    monkeypatch.setattr(table, "extract_one", lambda text, columns, model: fake_rows([["item"], ["other", "  "]]))
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model, request: fake_rows([["item"], ["other", "  "]]))
 
     rows = table.run(chunks[:1], COLUMNS, model=None)
 
@@ -86,14 +94,14 @@ def test_a_value_the_document_does_not_state_stays_empty(monkeypatch, chunks):
 
 
 def test_a_chunk_with_no_matching_item_contributes_no_rows(monkeypatch, chunks):
-    monkeypatch.setattr(table, "extract_one", lambda text, columns, model: fake_rows([]))
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model, request: fake_rows([]))
 
     assert table.run(chunks, COLUMNS, model=None) == []
 
 
 def test_a_model_failure_on_one_chunk_fails_the_run(monkeypatch, chunks):
-    def boom(text, columns, model):
-        if text.endswith("3"):
+    def boom(text, columns, model, request):
+        if text.startswith("text 3"):
             raise RuntimeError("model refused")
         return fake_rows([["item", "2027"]])
 
@@ -220,7 +228,7 @@ def test_a_chunk_the_model_loops_on_is_read_again_off_greedy(monkeypatch):
     calls, capped = [], []
     monkeypatch.setattr(table, "llm", fake_llm(calls, capped))
 
-    found = table.extract_one("text", COLUMNS, None)
+    found = table.extract_one("text", COLUMNS, None, "")
 
     assert calls == [0.0, table.RETRY_TEMPERATURE], "the retry must not repeat the greedy attempt"
     assert capped == [table.EXTRACT_MAX_TOKENS] * 2, "both attempts are capped, so a runaway fails fast"
@@ -239,13 +247,13 @@ def test_a_chunk_that_fails_twice_still_fails_the_run(monkeypatch):
     monkeypatch.setattr(table, "llm", build)
 
     with pytest.raises(ValueError, match="length limit"):
-        table.extract_one("text", COLUMNS, None)
+        table.extract_one("text", COLUMNS, None, "")
 
 
 def test_a_cancelled_run_stops_reading_chunks_instead_of_finishing_the_document(monkeypatch, chunks):
     read: list[str] = []
 
-    def slow_extract(text, columns, model):
+    def slow_extract(text, columns, model, request):
         read.append(text)
         time.sleep(0.1)
         return fake_rows([["item", "2027"]])
@@ -264,7 +272,7 @@ def test_a_failed_run_drops_the_chunks_it_had_not_started(monkeypatch):
     many = [{"id": f"f:{i}", "text": f"text {i}", "pages": [i], "headings": []} for i in range(12)]
     read: list[str] = []
 
-    def boom(text, columns, model):
+    def boom(text, columns, model, request):
         read.append(text)
         time.sleep(0.1)
         if text.endswith(" 1"):
@@ -291,7 +299,7 @@ def row(values: dict, *chunk_ids: str) -> dict:
 def test_an_item_found_in_several_chunks_becomes_one_row_citing_every_chunk(monkeypatch, chunks):
     # The same obligation is found in chunks 0 and 2; chunk 1 holds a different one
     found = {"text 0": [["bayar", ""]], "text 1": [["lapor", "10 Mei"]], "text 2": [["bayar", "31 Jan"]]}
-    monkeypatch.setattr(table, "extract_one", lambda text, columns, model: fake_rows(found[text]))
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model, request: fake_rows(found[text.split(":")[0]]))
     monkeypatch.setattr(table, "find_duplicates", lambda rows, columns, model: [[0, 2]])
 
     rows = table.run(chunks[:3], COLUMNS, model=None)
@@ -305,7 +313,7 @@ def test_an_item_found_in_several_chunks_becomes_one_row_citing_every_chunk(monk
 
 
 def test_distinct_items_are_not_merged(monkeypatch, chunks):
-    monkeypatch.setattr(table, "extract_one", lambda text, columns, model: fake_rows([[text, ""]]))
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model, request: fake_rows([[text, ""]]))
 
     rows = table.run(chunks[:3], COLUMNS, model=None)
 
@@ -334,7 +342,7 @@ def test_a_failed_merge_keeps_the_rows_unmerged_rather_than_losing_the_table(mon
     def boom(rows, columns, model):
         raise RuntimeError("model refused")
 
-    monkeypatch.setattr(table, "extract_one", lambda text, columns, model: fake_rows([["item", ""]]))
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model, request: fake_rows([["item", ""]]))
     monkeypatch.setattr(table, "find_duplicates", boom)
 
     assert len(table.run(chunks[:3], COLUMNS, model=None)) == 3
@@ -344,7 +352,7 @@ def test_there_is_no_merge_pass_when_there_is_nothing_to_merge(monkeypatch, chun
     def must_not_run(rows, columns, model):
         raise AssertionError("a single row cannot have a duplicate")
 
-    monkeypatch.setattr(table, "extract_one", lambda text, columns, model: fake_rows([["item", ""]]))
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model, request: fake_rows([["item", ""]]))
     monkeypatch.setattr(table, "find_duplicates", must_not_run)
 
     assert len(table.run(chunks[:1], COLUMNS, model=None)) == 1
@@ -413,3 +421,80 @@ def test_two_obligations_that_differ_by_one_word_stay_apart_even_with_no_deadlin
     ]
 
     assert len(table.merge_rows(rows, [[0, 1]])) == 2
+
+
+def test_a_value_the_passage_does_not_say_is_blanked_and_an_empty_row_is_dropped(monkeypatch):
+    passage = [{"id": "f:0", "text": "PERDA  Provinsi Jawa Timur Nomor 9 Tahun 2024 tentang APBD", "pages": [1], "headings": []}]
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model, request: fake_rows([
+        ["Perda Provinsi Jawa Timur Nomor 9 Tahun 2024", "masih berlaku"],  # re-spaced quote kept, invented status blanked
+        ["2", "9"],  # "2" is not in the passage; "9" is, as a word
+        ["tidak disebutkan", ""],  # nothing quoted at all: not a row
+    ]))
+
+    rows = table.run(passage, COLUMNS, model=None)
+
+    assert [r["values"] for r in rows] == [
+        {"Kewajiban": "Perda Provinsi Jawa Timur Nomor 9 Tahun 2024", "Tenggat": ""},
+        {"Kewajiban": "", "Tenggat": "9"},
+    ]
+
+
+def test_the_request_reaches_every_chunk_read(monkeypatch):
+    seen = []
+    monkeypatch.setattr(table, "read_structured", lambda schema, messages, model, max_tokens: seen.append(messages) or fake_rows([]))
+
+    table.extract_one("passage", COLUMNS, None, "every regulation that is a legal basis")
+
+    assert "Request:\nevery regulation that is a legal basis" in seen[0][1][1]
+
+
+def test_a_configured_table_model_takes_every_table_call_over_the_documents_model(monkeypatch):
+    monkeypatch.setattr(settings, "table_llm_model", "deepseek-ai/deepseek-v4.1-flash")
+    monkeypatch.setattr(table, "table_llm", lambda **options: ("table", options))
+    monkeypatch.setattr(table, "llm", lambda *a, **kw: pytest.fail("the document's model was used"))
+
+    assert table.chat("Qwen3.5-4B", max_tokens=3000) == ("table", {"max_tokens": settings.table_llm_max_tokens})
+
+
+def headed(i: int, heading: str) -> dict:
+    return {"id": f"f:{i}", "text": f"{heading}\nbody {i}", "pages": [i], "headings": [heading]}
+
+
+SCOPED_DOC = [headed(0, "Landasan hukum"), headed(1, "Landasan hukum"), headed(2, "Katalog website"), headed(3, "Kontak")]
+
+
+def test_scope_reads_only_the_parts_the_model_picks_with_the_whole_outline_in_view(monkeypatch):
+    seen = []
+
+    def pick(schema, messages, model, max_tokens):
+        seen.append(messages[1][1])
+        return table.ScopedParts(parts=[1, 99])  # 99 does not exist and is ignored
+
+    monkeypatch.setattr(table, "read_structured", pick)
+
+    chosen = table.scope("landasan hukum layanan", SCOPED_DOC, None)
+
+    assert [c["id"] for c in chosen] == ["f:0", "f:1"], "a part is every chunk under its heading"
+    assert "1. Landasan hukum -- body 0" in seen[0] and "2. Katalog website" in seen[0] and "3. Kontak" in seen[0]
+
+
+@pytest.mark.parametrize("answer", [table.ScopedParts(parts=[]), table.ScopedParts(parts=[0, 7]), RuntimeError("down")])
+def test_scope_reads_the_whole_document_when_it_gets_no_usable_answer(monkeypatch, answer):
+    def reply(*_):
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(table, "read_structured", reply)
+
+    assert table.scope("anything", SCOPED_DOC, None) == SCOPED_DOC
+
+
+def test_a_run_with_a_request_extracts_only_from_its_scope(monkeypatch):
+    monkeypatch.setattr(table, "read_structured", lambda schema, messages, model, max_tokens: table.ScopedParts(parts=[2]))
+    read = []
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model, request: read.append(text) or fake_rows([]))
+
+    table.run(SCOPED_DOC, COLUMNS, None, request="katalog")
+
+    assert read == [SCOPED_DOC[2]["text"]]

@@ -59,6 +59,19 @@ def _llm(model: str, temperature: float = 0.0, max_tokens: int | None = None) ->
 
 
 @lru_cache
+def table_llm(temperature: float = 0.0, max_tokens: int | None = None) -> BaseChatModel:
+    """Table Extraction's own model (TABLE_LLM_* in config), always an OpenAI-compatible endpoint."""
+    return ChatOpenAI(
+        model=settings.table_llm_model,
+        api_key=_api_key(settings.table_llm_api_key, "TABLE_LLM_API_KEY"),
+        base_url=settings.table_llm_base_url,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=LLM_TIMEOUT_S,
+    )
+
+
+@lru_cache
 def embeddings() -> Embeddings:
     if settings.embed_provider == "openai":
         return OpenAIEmbeddings(

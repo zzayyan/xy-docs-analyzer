@@ -71,7 +71,7 @@ def test_create_runs_the_extraction_in_the_background_and_saves_its_rows(stubbed
     rows = [{"values": {"Kewajiban": "bayar"}, "citations": [
         {"n": 1, "chunk_id": "f:0", "pages": [1], "headings": [], "regions": [], "source": "table", "text": "text"},
     ]}]
-    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop: rows)
+    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop, request: rows)
 
     # TestClient runs background tasks before returning, so the run is finished here
     response = client.post("/documents/d1/tables", json={"request": "setiap kewajiban", "columns": COLUMNS})
@@ -88,7 +88,7 @@ def test_create_runs_the_extraction_in_the_background_and_saves_its_rows(stubbed
 
 
 def test_a_failed_run_is_stored_with_its_error_and_keeps_its_columns(stubbed, monkeypatch):
-    def boom(chunks, columns, model, on_progress, should_stop):
+    def boom(chunks, columns, model, on_progress, should_stop, request):
         raise RuntimeError("model refused")
 
     monkeypatch.setattr(api_module, "run_table", boom)
@@ -102,7 +102,7 @@ def test_a_failed_run_is_stored_with_its_error_and_keeps_its_columns(stubbed, mo
 
 
 def test_a_cancel_that_lands_after_the_last_chunk_is_not_overwritten_by_done(stubbed, monkeypatch):
-    def cancelled_while_merging(chunks, columns, model, on_progress, should_stop):
+    def cancelled_while_merging(chunks, columns, model, on_progress, should_stop, request):
         stubbed["e1"]["status"] = "cancelled"  # the user's cancel, landing during the merge call
         return [{"values": {"Kewajiban": "bayar"}, "citations": []}]
 
@@ -123,7 +123,7 @@ def test_create_is_409_while_the_document_is_still_ingesting(stubbed, monkeypatc
 
 
 def test_list_returns_the_documents_table_extractions(stubbed, monkeypatch):
-    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop: [])
+    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop, request: [])
     client.post("/documents/d1/tables", json={"request": "setiap kewajiban", "columns": COLUMNS})
 
     listed = client.get("/documents/d1/tables").json()
@@ -191,7 +191,7 @@ def test_propose_is_409_while_the_document_is_still_ingesting(stubbed, monkeypat
 
 
 def test_a_second_run_is_refused_while_one_is_still_in_flight(stubbed, monkeypatch):
-    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop: [])
+    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop, request: [])
     first = client.post("/documents/d1/tables", json={"request": "q", "columns": COLUMNS})
     assert first.status_code == 200
 
@@ -207,7 +207,7 @@ def test_a_second_run_is_refused_while_one_is_still_in_flight(stubbed, monkeypat
 def test_cancelling_a_run_stops_it_and_records_that_the_user_stopped_it(stubbed, monkeypatch):
     stopped = []
 
-    def slow_run(chunks, columns, model, on_progress, should_stop):
+    def slow_run(chunks, columns, model, on_progress, should_stop, request):
         # The run asks between chunks; the endpoint has already marked it cancelled by then
         stopped.append(should_stop())
         raise table_module.Stopped()
@@ -221,7 +221,7 @@ def test_cancelling_a_run_stops_it_and_records_that_the_user_stopped_it(stubbed,
 
 
 def test_cancel_marks_a_running_extraction_and_is_refused_once_it_has_finished(stubbed, monkeypatch):
-    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop: [])
+    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop, request: [])
     table_id = client.post("/documents/d1/tables", json={"request": "q", "columns": COLUMNS}).json()["id"]
 
     assert client.post(f"/documents/d1/tables/{table_id}/cancel").status_code == 409, "the run already finished"
@@ -235,7 +235,7 @@ def test_cancel_marks_a_running_extraction_and_is_refused_once_it_has_finished(s
 def test_progress_records_how_many_chunks_are_done(stubbed, monkeypatch):
     mid_run = {}
 
-    def run_with_progress(chunks, columns, model, on_progress, should_stop):
+    def run_with_progress(chunks, columns, model, on_progress, should_stop, request):
         on_progress(1, len(chunks))
         mid_run.update(stubbed["e1"])
         return []
