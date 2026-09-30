@@ -125,6 +125,32 @@ export interface TableExtraction {
   updated_at: number;
 }
 
+export interface GraphNode {
+  key: string;
+  name: string;
+  type: string | null;
+  mentions: number;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type: string;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  total: number;
+}
+
+export interface EntityDetail {
+  entity: GraphNode;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  citations: Citation[];
+}
+
 export class ApiError extends Error {
   status: number;
   detail: string;
@@ -216,6 +242,12 @@ export const api = {
   listTables: (docId: string) => request<TableExtraction[]>(`/documents/${docId}/tables`),
 
   getTable: (docId: string, tableId: string) => request<TableExtraction>(`/documents/${docId}/tables/${tableId}`),
+
+  graph: (docId: string) => request<GraphData>(`/documents/${docId}/graph`),
+
+  // A query parameter, not a path segment: entity names contain "/"
+  entity: (docId: string, key: string) =>
+    request<EntityDetail>(`/documents/${docId}/graph/entity?key=${encodeURIComponent(key)}`),
 };
 
 /** Statuses that mean ingest is still running — used to decide whether to keep polling. */

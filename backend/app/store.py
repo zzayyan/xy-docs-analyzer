@@ -124,6 +124,62 @@ def fail_interrupted(error: str) -> None:
         graph().query(statement, {"error": error})
 
 
+# The knowledge graph as the Graph tab draws it: the most mentioned entities, and only the relationships
+# between two of them, so no edge points at a node that is not drawn.
+GRAPH_TOP = """
+MATCH (e:__Entity__ {file_id: $file_id})
+WITH e, COUNT { (:Chunk)-[:MENTIONS]->(e) } AS mentions
+ORDER BY mentions DESC, e.key
+LIMIT $limit
+WITH collect(e) AS top, collect({key: e.key, name: e.name, type: e.type, mentions: mentions}) AS nodes
+UNWIND top AS a
+OPTIONAL MATCH (a)-[r]->(b:__Entity__) WHERE b IN top AND b <> a
+WITH nodes, collect(CASE WHEN r IS NULL THEN null ELSE {source: a.key, target: b.key, type: type(r)} END) AS edges
+RETURN nodes, edges, COUNT { (:__Entity__ {file_id: $file_id}) } AS total
+"""
+
+ENTITY = """
+MATCH (e:__Entity__ {file_id: $file_id, key: $key})
+RETURN e.key AS key, e.name AS name, e.type AS type, COUNT { (:Chunk)-[:MENTIONS]->(e) } AS mentions
+"""
+
+# One step out from an entity, both directions, most mentioned neighbours first
+ENTITY_NEIGHBOURS = """
+MATCH (e:__Entity__ {file_id: $file_id, key: $key})-[r]-(n:__Entity__)
+WHERE n <> e
+WITH r, n, startNode(r) = e AS outgoing, COUNT { (:Chunk)-[:MENTIONS]->(n) } AS mentions
+ORDER BY mentions DESC, n.key
+LIMIT $limit
+RETURN n.key AS key, n.name AS name, n.type AS type, mentions, type(r) AS rel, outgoing
+"""
+
+ENTITY_CHUNKS = """
+MATCH (c:Chunk {file_id: $file_id})-[:MENTIONS]->(:__Entity__ {file_id: $file_id, key: $key})
+RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings, c.regions AS regions
+ORDER BY c.idx
+LIMIT $limit
+"""
+
+
+def graph_top(file_id: str, limit: int) -> dict:
+    [row] = graph().query(GRAPH_TOP, {"file_id": file_id, "limit": limit}) or [{"nodes": [], "edges": [], "total": 0}]
+    return {"nodes": row["nodes"], "edges": [e for e in row["edges"] if e], "total": row["total"]}
+
+
+def entity(file_id: str, key: str) -> dict | None:
+    rows = graph().query(ENTITY, {"file_id": file_id, "key": key})
+    return rows[0] if rows else None
+
+
+def entity_neighbours(file_id: str, key: str, limit: int) -> list[dict]:
+    return graph().query(ENTITY_NEIGHBOURS, {"file_id": file_id, "key": key, "limit": limit})
+
+
+def entity_chunks(file_id: str, key: str, limit: int) -> list[dict]:
+    rows = graph().query(ENTITY_CHUNKS, {"file_id": file_id, "key": key, "limit": limit})
+    return [{**row, "regions": json.loads(row.get("regions") or "[]")} for row in rows]
+
+
 def list_files() -> list[dict]:
     return [row["file"] for row in graph().query(LIST_FILES)]
 

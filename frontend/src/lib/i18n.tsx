@@ -94,6 +94,17 @@ export interface Dict {
   outlineChunkCount: (n: number) => string;
   outlineChunksEmpty: string;
 
+  tabGraph: string;
+  graphEmpty: string;
+  graphSearch: string;
+  graphShowing: (shown: number, total: number) => string;
+  graphMentions: (n: number) => string;
+  graphRelations: string;
+  graphNoRelations: string;
+  graphEvidence: string;
+  graphHint: string;
+  graphTypes: Record<string, string>;
+
   tabTable: string;
   tableIntro: string;
   tablePlaceholder: string;
@@ -225,6 +236,20 @@ const en: Dict = {
   outlineChunkCount: (n) => `${n} chunk${n === 1 ? '' : 's'}`,
   outlineChunksEmpty: 'This section has no text of its own. Its subsections hold the content.',
 
+  tabGraph: 'Graph',
+  graphEmpty: 'No knowledge graph for this document.',
+  graphSearch: 'Find an entity...',
+  graphShowing: (shown, total) => `Showing ${shown} of ${total} entities`,
+  graphMentions: (n) => (n === 1 ? 'Mentioned in 1 passage' : `Mentioned in ${n} passages`),
+  graphRelations: 'Relations',
+  graphNoRelations: 'No relations to other entities.',
+  graphEvidence: 'Where it is mentioned',
+  graphHint: 'Drag to move, scroll to zoom, click an entity to explore it.',
+  graphTypes: {
+    Person: 'Person', Organization: 'Organization', Location: 'Location', Concept: 'Concept',
+    Event: 'Event', Product: 'Product', Regulation: 'Regulation', Date: 'Date / value',
+  },
+
   tabTable: 'Table',
   tableIntro: 'Describe what to pull out of this document, and the columns are proposed for you to edit.',
   tablePlaceholder: 'e.g. every obligation, its due date and amount',
@@ -355,6 +380,20 @@ const id: Dict = {
   outlinePageRange: (start, end) => (start === end ? `hal. ${start}` : `hal. ${start}-${end}`),
   outlineChunkCount: (n) => `${n} chunk`,
   outlineChunksEmpty: 'Bagian ini tidak punya teks sendiri. Isinya ada di sub-bagian.',
+
+  tabGraph: 'Graf',
+  graphEmpty: 'Dokumen ini tidak punya graf pengetahuan.',
+  graphSearch: 'Cari entitas...',
+  graphShowing: (shown, total) => `Menampilkan ${shown} dari ${total} entitas`,
+  graphMentions: (n) => `Disebut di ${n} bagian`,
+  graphRelations: 'Relasi',
+  graphNoRelations: 'Tidak ada relasi ke entitas lain.',
+  graphEvidence: 'Disebut di mana',
+  graphHint: 'Seret untuk menggeser, gulir untuk zoom, klik entitas untuk menjelajah.',
+  graphTypes: {
+    Person: 'Orang', Organization: 'Organisasi', Location: 'Lokasi', Concept: 'Konsep',
+    Event: 'Peristiwa', Product: 'Produk', Regulation: 'Regulasi', Date: 'Tanggal / nilai',
+  },
 
   tabTable: 'Tabel',
   tableIntro: 'Jelaskan apa yang ingin diambil dari dokumen ini, lalu kolomnya diusulkan untuk Anda sunting.',

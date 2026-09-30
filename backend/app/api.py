@@ -173,6 +173,32 @@ class Turn(BaseModel):
     created_at: int
 
 
+class GraphNode(BaseModel):
+    key: str
+    name: str
+    type: str | None = None
+    mentions: int
+
+
+class GraphEdge(BaseModel):
+    source: str
+    target: str
+    type: str
+
+
+class GraphData(BaseModel):
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    total: int
+
+
+class EntityDetail(BaseModel):
+    entity: GraphNode
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    citations: list[Citation]
+
+
 def get_file(doc_id: str) -> dict:
     file = store.get_file(doc_id)
     if file is None:
@@ -483,6 +509,43 @@ def export_table_extraction(doc_id: str, table_id: str) -> Response:
         buffer.getvalue(), media_type=XLSX,
         headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'},
     )
+
+
+# ponytail: the Graph tab draws the most mentioned entities, not all of them (a 116-chunk thesis has ~1100);
+# the rest are reached by expanding an entity's neighbours. Paginate or cluster if that stops being enough.
+GRAPH_NODES = 120
+ENTITY_NEIGHBOURS = 40
+ENTITY_EVIDENCE = 20
+
+
+@app.get("/documents/{doc_id}/graph", response_model=GraphData)
+def document_graph(doc_id: str, limit: int = GRAPH_NODES) -> dict:
+    """The knowledge graph's most mentioned entities and the relationships between them. A short
+    document has no graph, which is an empty one here, not an error."""
+    get_file(doc_id)
+    return store.graph_top(doc_id, min(limit, 500))
+
+
+@app.get("/documents/{doc_id}/graph/entity", response_model=EntityDetail)
+def document_graph_entity(doc_id: str, key: str) -> dict:
+    """One entity: its neighbours one step out, and the chunks that mention it as citations the source
+    panel opens like a chat answer's. The key is a query parameter because entity names contain "/"."""
+    get_file(doc_id)
+    entity = store.entity(doc_id, key)
+    if entity is None:
+        raise HTTPException(status_code=404, detail="entity not found")
+    neighbours = store.entity_neighbours(doc_id, key, ENTITY_NEIGHBOURS)
+    nodes = list({n["key"]: {k: n[k] for k in ("key", "name", "type", "mentions")} for n in neighbours}.values())
+    edges = [
+        {"source": key, "target": n["key"], "type": n["rel"]} if n["outgoing"]
+        else {"source": n["key"], "target": key, "type": n["rel"]}
+        for n in neighbours
+    ]
+    chunks = store.entity_chunks(doc_id, key, ENTITY_EVIDENCE)
+    return {
+        "entity": entity, "nodes": nodes, "edges": edges,
+        "citations": to_citations([{**chunk, "source": "kg"} for chunk in chunks]),
+    }
 
 
 @app.get("/documents/{doc_id}/turns", response_model=list[Turn])

@@ -5,6 +5,7 @@ import { ChatPanel } from '../components/ChatPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorDetail } from '../components/ErrorDetail';
 import { IngestProgress } from '../components/IngestProgress';
+import { GraphPanel } from '../components/GraphPanel';
 import { OutlinePanel } from '../components/OutlinePanel';
 import { TablePanel } from '../components/TablePanel';
 import { Toast } from '../components/Toast';
@@ -14,9 +15,9 @@ import { STATUS_TONE, statusLabel } from '../lib/status';
 import { useLang } from '../lib/i18n';
 import { navigate } from '../lib/useHashRoute';
 
-type Tab = 'chat' | 'outline' | 'table';
+type Tab = 'chat' | 'outline' | 'graph' | 'table';
 
-const TAB_LABEL = { chat: 'tabChat', outline: 'tabOutline', table: 'tabTable' } as const;
+const TAB_LABEL = { chat: 'tabChat', outline: 'tabOutline', graph: 'tabGraph', table: 'tabTable' } as const;
 
 export function DocumentScreen({ docId }: { docId: string }) {
   const { t, lang } = useLang();
@@ -77,8 +78,8 @@ export function DocumentScreen({ docId }: { docId: string }) {
 
         {doc?.status === 'done' && (
           <div className="segmented" role="tablist">
-            {/* Outline only exists for a long Document; Chat and Table work for both modes. */}
-            {(doc.mode === 'long' ? (['chat', 'outline', 'table'] as const) : (['chat', 'table'] as const)).map((key) => (
+            {/* Outline and Graph only exist for a long Document; Chat and Table work for both modes. */}
+            {(doc.mode === 'long' ? (['chat', 'outline', 'graph', 'table'] as const) : (['chat', 'table'] as const)).map((key) => (
               <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
                 {t[TAB_LABEL[key]]}
               </button>
@@ -130,6 +131,8 @@ export function DocumentScreen({ docId }: { docId: string }) {
             <TablePanel docId={doc.id} />
           ) : tab === 'outline' && doc.mode === 'long' ? (
             <OutlinePanel docId={doc.id} />
+          ) : tab === 'graph' && doc.mode === 'long' ? (
+            <GraphPanel docId={doc.id} />
           ) : (
             <ChatPanel docId={doc.id} />
           ))}
