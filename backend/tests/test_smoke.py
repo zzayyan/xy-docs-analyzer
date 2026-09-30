@@ -24,13 +24,10 @@ def ask(doc_id: str, question: str) -> dict:
     events: dict[str, object] = {"token": ""}
     with client.stream("GET", "/chat/stream", params={"doc_id": doc_id, "question": question}) as r:
         assert r.status_code == 200
-        for block in r.read().decode().split("
-
-"):
+        for block in r.read().decode().split("\n\n"):
             if not block.strip():
                 continue
-            event, data = (line.split(": ", 1)[1] for line in block.strip().split("
-"))
+            event, data = (line.split(": ", 1)[1] for line in block.strip().split("\n"))
             events[event] = events["token"] + json.loads(data) if event == "token" else json.loads(data)
     assert "done" in events, events
     return {"answer": events["token"], "citations": events.get("citations", [])}
