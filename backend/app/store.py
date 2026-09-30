@@ -57,7 +57,7 @@ FIRST_CHUNKS = ALL_CHUNKS + "LIMIT $limit"
 CREATE_TABLE_EXTRACTION = """
 MATCH (f:File {id: $file_id})
 CREATE (f)-[:HAS_TABLE]->(:TableExtraction {
-    id: $id, file_id: $file_id, request: $request, columns: $columns, rows: '[]',
+    id: $id, file_id: $file_id, request: $request, columns: $columns, rows: '[]', read_all: $read_all,
     status: 'queued', progress: 0.0, created_at: timestamp(), updated_at: timestamp()
 })
 """
@@ -194,6 +194,23 @@ def delete_file(file_id: str) -> None:
         graph().query(statement, {"id": file_id})
 
 
+# What a failed ingest may have left behind, cleared before it runs again. The File, its Turns and its
+# Table Extractions stay: a retry is the same Document, not a new one.
+RESET_INGEST = [
+    "MATCH (n:Chunk {file_id: $id}) DETACH DELETE n",
+    "MATCH (n:Section {file_id: $id}) DETACH DELETE n",
+    "MATCH (n:__Entity__ {file_id: $id}) DETACH DELETE n",
+    "MATCH (f:File {id: $id}) SET f.status = 'queued', f.progress = 0.0, f.error = null, f.step_done = 0, "
+    "f.step_total = 0, f.mode = null, f.tokens = null, f.chunks = null, f.graph_skipped = null, "
+    "f.updated_at = timestamp()",
+]
+
+
+def reset_ingest(file_id: str) -> None:
+    for statement in RESET_INGEST:
+        graph().query(statement, {"id": file_id})
+
+
 def list_sections(file_id: str) -> list[dict]:
     return graph().query(LIST_SECTIONS, {"file_id": file_id})
 
@@ -250,11 +267,12 @@ def _table_extraction(row: dict) -> dict:
     return {**row, "columns": json.loads(row["columns"]), "rows": rows}
 
 
-def create_table_extraction(file_id: str, request: str, columns: list[dict]) -> dict:
+def create_table_extraction(file_id: str, request: str, columns: list[dict], read_all: bool = False) -> dict:
     """Anchored on MATCH (f:File ...), so a document deleted first leaves no orphaned TableExtraction."""
     extraction_id = str(uuid.uuid4())
     graph().query(CREATE_TABLE_EXTRACTION, {
         "id": extraction_id, "file_id": file_id, "request": request, "columns": json.dumps(columns),
+        "read_all": read_all,
     })
     return get_table_extraction(file_id, extraction_id)
 

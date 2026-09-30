@@ -45,6 +45,16 @@ export function DocumentScreen({ docId }: { docId: string }) {
     },
   });
 
+  const retryMutation = useMutation({
+    mutationFn: () => api.retryDocument(docId),
+    // The document is queued again, which puts its query back on the 2 s ingest poll
+    onSuccess: (document) => {
+      queryClient.setQueryData(['document', docId], document);
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+    },
+    onError: (error: unknown) => setToast(error instanceof ApiError ? error.detail : t.errorGeneric),
+  });
+
   const doc = documentQuery.data;
 
   return (
@@ -121,6 +131,16 @@ export function DocumentScreen({ docId }: { docId: string }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
                 <span>{t.docErrorReupload}</span>
                 {doc.error && <ErrorDetail message={doc.error} limit={160} />}
+                {doc.has_original && (
+                  <button
+                    className="quiet-button"
+                    style={{ alignSelf: 'flex-start' }}
+                    onClick={() => retryMutation.mutate()}
+                    disabled={retryMutation.isPending}
+                  >
+                    {retryMutation.isPending ? t.docRetrying : t.docRetry}
+                  </button>
+                )}
               </div>
             </Alert>
           </div>

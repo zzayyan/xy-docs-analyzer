@@ -6,6 +6,8 @@ import {
   forceLink,
   forceManyBody,
   forceSimulation,
+  forceX,
+  forceY,
   type Simulation,
   type SimulationLinkDatum,
   type SimulationNodeDatum,
@@ -37,6 +39,18 @@ const PRESETTLE_TICKS = 200;
 
 const colorOf = (type: string | null) => (type && TYPE_COLOR[type]) || OTHER_COLOR;
 const radiusOf = (n: GraphNode) => 4 + 3 * Math.sqrt(n.mentions);
+const labelText = (name: string) => (name.length > 32 ? `${name.slice(0, 30)}…` : name);
+
+/** The zoom and offset that fit these nodes into a w x h viewport, with a margin, never zooming past 1.5x */
+function fitTransform(nodes: SimNode[], w: number, h: number) {
+  if (nodes.length === 0 || w === 0 || h === 0) return { x: 0, y: 0, k: 1 };
+  const xs = nodes.map((n) => n.x ?? 0);
+  const ys = nodes.map((n) => n.y ?? 0);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const k = Math.min(1.5, Math.max(MIN_ZOOM, Math.min(w / (maxX - minX + 120), h / (maxY - minY + 120))));
+  return { k, x: -((minX + maxX) / 2) * k, y: -((minY + maxY) / 2) * k };
+}
+
 const endKey = (end: SimLink['source']) => (typeof end === 'object' ? (end as SimNode).key : String(end));
 
 /** The document's knowledge graph, drawn as a force layout: its most mentioned entities first, and any
@@ -71,6 +85,11 @@ export function GraphPanel({ docId }: { docId: string }) {
   const [hovered, setHovered] = useState<string | null>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
+  // Viewport, declared ahead of the layout effect that frames the first layout in it
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [size, setSize] = useState({ w: 800, h: 600 });
+  const [view, setView] = useState({ x: 0, y: 0, k: 1 });
+
   // ---- Layout ----
   const simRef = useRef<Simulation<SimNode, SimLink> | null>(null);
   // The simulation mutates its node objects in place; each tick copies them into state, which is what
@@ -110,12 +129,21 @@ export function GraphPanel({ docId }: { docId: string }) {
       .force('link', forceLink<SimNode, SimLink>(nextLinks).id((d) => d.key).distance(70).strength(0.25))
       .force('charge', forceManyBody().strength(-140))
       .force('center', forceCenter(0, 0))
-      .force('collide', forceCollide<SimNode>().radius((d) => radiusOf(d) + 3));
+      .force('collide', forceCollide<SimNode>().radius((d) => radiusOf(d) + 3))
+      // A gentle pull to the middle: without it, entities with no relation drift far out and the view
+      // fitted around them leaves the connected graph tiny
+      .force('x', forceX(0).strength(0.08))
+      .force('y', forceY(0).strength(0.08));
     if (first) {
       // Most of the first layout runs here, off-screen: rendering every tick of it redraws a few hundred
       // SVG elements per frame for seconds. What is left still animates, so the graph visibly settles.
       sim.stop().alpha(1).tick(PRESETTLE_TICKS);
       sim.alpha(0.3).restart();
+      // Opens framed on the whole graph rather than at 1x, where much of it sat off-screen
+      requestAnimationFrame(() => {
+        const el = svgRef.current;
+        if (el) setView(fitTransform(sim.nodes(), el.clientWidth, el.clientHeight));
+      });
     } else {
       sim.alpha(0.5).restart();
     }
@@ -125,9 +153,6 @@ export function GraphPanel({ docId }: { docId: string }) {
   useEffect(() => () => void simRef.current?.stop(), []);
 
   // ---- Viewport: pan, zoom, drag ----
-  const svgRef = useRef<SVGSVGElement>(null);
-  const [size, setSize] = useState({ w: 800, h: 600 });
-  const [view, setView] = useState({ x: 0, y: 0, k: 1 });
   const [panning, setPanning] = useState(false);
   const drag = useRef<{ kind: 'pan' | 'node'; key?: string; startX: number; startY: number; moved: boolean; vx: number; vy: number } | null>(null);
 
@@ -217,6 +242,22 @@ export function GraphPanel({ docId }: { docId: string }) {
   }
   const all = frame.nodes;
   const labelled = new Set([...all].sort((a, b) => b.mentions - a.mentions).slice(0, LABELLED).map((n) => n.key));
+  // Labels are placed most important first and skipped where they would overlap one already placed;
+  // the selected and hovered entities always get theirs. Boxes are in graph units, as the labels are.
+  const rank = (n: SimNode) =>
+    n.key === selectedKey || n.key === hovered ? 3 : neighbours.has(n.key) ? 2 : labelled.has(n.key) ? 1 : 0;
+  const placed: [number, number, number, number][] = [];
+  const shownLabels = new Set<string>();
+  for (const n of nodes.filter((n) => rank(n) > 0).sort((a, b) => rank(b) - rank(a) || b.mentions - a.mentions)) {
+    const w = (labelText(n.name).length * 6.2) / view.k;
+    const top = (n.y ?? 0) + radiusOf(n);
+    const box: [number, number, number, number] = [(n.x ?? 0) - w / 2, top, (n.x ?? 0) + w / 2, top + 14 / view.k];
+    const clear = placed.every(([l, t2, r, b]) => box[2] < l || box[0] > r || box[3] < t2 || box[1] > b);
+    if (clear || rank(n) === 3) {
+      placed.push(box);
+      shownLabels.add(n.key);
+    }
+  }
   const counts = new Map<string, number>();
   for (const n of all) counts.set(n.type ?? '', (counts.get(n.type ?? '') ?? 0) + 1);
   const typeCounts = [...counts.entries()].sort((a, b) => b[1] - a[1]);
@@ -270,6 +311,9 @@ export function GraphPanel({ docId }: { docId: string }) {
           <span style={{ marginLeft: 'auto', fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>
             {t.graphShowing(frame.nodes.length, Math.max(graphQuery.data.total, frame.nodes.length))}
           </span>
+          <button className="quiet-button" onClick={() => setView(fitTransform(nodes, size.w, size.h))}>
+            {t.graphFit}
+          </button>
         </div>
 
         <svg
@@ -301,7 +345,6 @@ export function GraphPanel({ docId }: { docId: string }) {
             })}
             {nodes.map((n) => {
               const r = radiusOf(n);
-              const showLabel = labelled.has(n.key) || n.key === hovered || n.key === selectedKey || neighbours.has(n.key);
               return (
                 <g
                   key={n.key}
@@ -317,18 +360,31 @@ export function GraphPanel({ docId }: { docId: string }) {
                     stroke={n.key === selectedKey ? 'var(--text-title)' : 'var(--surface-card)'}
                     strokeWidth={n.key === selectedKey ? 2.5 : 1.5}
                   />
-                  {showLabel && (
-                    <text
-                      y={r + 11 / view.k}
-                      textAnchor="middle"
-                      style={{ fontSize: 11 / view.k, fill: 'var(--text-title)', paintOrder: 'stroke', stroke: 'var(--surface-page)', strokeWidth: 3 / view.k, pointerEvents: 'none' }}
-                    >
-                      {n.name.length > 32 ? `${n.name.slice(0, 30)}…` : n.name}
-                    </text>
-                  )}
                 </g>
               );
             })}
+            {/* Labels in their own layer over every node, so a node drawn later never covers one */}
+            {nodes
+              .filter((n) => shownLabels.has(n.key))
+              .map((n) => (
+                <text
+                  key={n.key}
+                  x={n.x ?? 0}
+                  y={(n.y ?? 0) + radiusOf(n) + 11 / view.k}
+                  textAnchor="middle"
+                  style={{
+                    fontSize: 11 / view.k,
+                    fill: 'var(--text-title)',
+                    opacity: dim(n.key) ? 0.15 : 1,
+                    paintOrder: 'stroke',
+                    stroke: 'var(--surface-page)',
+                    strokeWidth: 3 / view.k,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {labelText(n.name)}
+                </text>
+              ))}
           </g>
         </svg>
 

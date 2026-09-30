@@ -74,9 +74,10 @@ npx tsc -b && npm run lint && npm run build
   stored exactly as received under `DATA_DIR` (default `backend/data/originals/`) and
   opens from the Document header's "Original" link; deleting the Document deletes its
   Original. Documents ingested
-  before this change have no Original. There's still no re-ingest: a document that fails
-  partway through has to be re-uploaded. A server restart (including `--reload` picking
-  up a saved file) marks every unfinished ingest and table run as failed.
+  before this change have no Original. A document that fails partway through (a server
+  restart, including `--reload` picking up a saved file, marks it failed too) can be
+  retried from its Original with "Try again"; one ingested before Originals were kept
+  has to be re-uploaded.
 - **One PDF converts at a time.** Docling peaks at ~14 GB per 25-page batch, so a second
   upload stays `queued` until the first finishes converting.
 - **No auth.** Every document is readable and deletable by anyone who can reach the

@@ -42,5 +42,7 @@ item of its kind anywhere in the document, or when it cannot tell.
   could see and delete. Failing open on every doubtful answer keeps that risk to a wrong confident
   answer.
 - A scoped run is also cheaper: fewer chunks read, fewer rows to merge.
+- A finished scoped run shows which parts it read, out of how many passages, with a "read the whole
+  document" action that re-runs the same table unscoped, so a wrong scope is visible and recoverable.
 - Past `SCOPE_MAX_PARTS` parts the listing no longer fits a small model's context and the whole
   document is read. Scoping section by section is the upgrade if long documents need it.

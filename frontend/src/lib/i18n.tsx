@@ -55,6 +55,8 @@ export interface Dict {
   unitSections: string;
   docErrorTitle: string;
   docErrorReupload: string;
+  docRetry: string;
+  docRetrying: string;
 
   chatPlaceholder: string;
   chatSend: string;
@@ -103,6 +105,7 @@ export interface Dict {
   graphNoRelations: string;
   graphEvidence: string;
   graphHint: string;
+  graphFit: string;
   graphTypes: Record<string, string>;
 
   tabTable: string;
@@ -137,6 +140,8 @@ export interface Dict {
   tableStatusCancelled: string;
   tableCancelAction: string;
   tableCancelledNotice: string;
+  tableReadScope: (parts: number, chunks: number, total: number) => string;
+  tableReadAll: string;
   tableExportAction: string;
   tableDeleteAction: string;
   tableDeleteConfirmTitle: string;
@@ -196,7 +201,9 @@ const en: Dict = {
   unitChunks: 'chunks',
   unitSections: 'sections',
   docErrorTitle: 'Processing failed',
-  docErrorReupload: 'This document could not be processed. Delete it and upload the original file again.',
+  docErrorReupload: 'This document could not be processed. Try again, or delete it and upload the original file again.',
+  docRetry: 'Try again',
+  docRetrying: 'Starting...',
 
   chatPlaceholder: 'Ask about this document',
   chatSend: 'Send',
@@ -245,6 +252,7 @@ const en: Dict = {
   graphNoRelations: 'No relations to other entities.',
   graphEvidence: 'Where it is mentioned',
   graphHint: 'Drag to move, scroll to zoom, click an entity to explore it.',
+  graphFit: 'Fit to view',
   graphTypes: {
     Person: 'Person', Organization: 'Organization', Location: 'Location', Concept: 'Concept',
     Event: 'Event', Product: 'Product', Regulation: 'Regulation', Date: 'Date / value',
@@ -282,6 +290,9 @@ const en: Dict = {
   tableStatusCancelled: 'Stopped',
   tableCancelAction: 'Stop',
   tableCancelledNotice: 'You stopped this run, so it has no rows. Its columns are kept.',
+  tableReadScope: (parts, chunks, total) =>
+    `Read only the ${parts === 1 ? 'part' : `${parts} parts`} that answer the request (${chunks} of ${total} passages):`,
+  tableReadAll: 'Read the whole document instead',
   tableExportAction: 'Export XLSX',
   tableDeleteAction: 'Delete table',
   tableDeleteConfirmTitle: 'Delete this table extraction?',
@@ -341,7 +352,9 @@ const id: Dict = {
   unitChunks: 'chunk',
   unitSections: 'bagian',
   docErrorTitle: 'Proses gagal',
-  docErrorReupload: 'Dokumen ini gagal diproses. Hapus dan unggah ulang berkas aslinya.',
+  docErrorReupload: 'Dokumen ini gagal diproses. Coba lagi, atau hapus dan unggah ulang berkas aslinya.',
+  docRetry: 'Coba lagi',
+  docRetrying: 'Memulai...',
 
   chatPlaceholder: 'Tanya tentang dokumen ini',
   chatSend: 'Kirim',
@@ -390,6 +403,7 @@ const id: Dict = {
   graphNoRelations: 'Tidak ada relasi ke entitas lain.',
   graphEvidence: 'Disebut di mana',
   graphHint: 'Seret untuk menggeser, gulir untuk zoom, klik entitas untuk menjelajah.',
+  graphFit: 'Paskan ke layar',
   graphTypes: {
     Person: 'Orang', Organization: 'Organisasi', Location: 'Lokasi', Concept: 'Konsep',
     Event: 'Peristiwa', Product: 'Produk', Regulation: 'Regulasi', Date: 'Tanggal / nilai',
@@ -427,6 +441,9 @@ const id: Dict = {
   tableStatusCancelled: 'Dihentikan',
   tableCancelAction: 'Hentikan',
   tableCancelledNotice: 'Run ini Anda hentikan, jadi tidak ada baris. Kolomnya tetap disimpan.',
+  tableReadScope: (parts, chunks, total) =>
+    `Hanya membaca ${parts} bagian yang menjawab permintaan (${chunks} dari ${total} potongan):`,
+  tableReadAll: 'Baca seluruh dokumen',
   tableExportAction: 'Ekspor XLSX',
   tableDeleteAction: 'Hapus tabel',
   tableDeleteConfirmTitle: 'Hapus ekstraksi tabel ini?',

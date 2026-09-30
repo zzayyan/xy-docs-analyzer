@@ -490,11 +490,6 @@ def test_scope_reads_the_whole_document_when_it_gets_no_usable_answer(monkeypatc
     assert table.scope("anything", SCOPED_DOC, None) == SCOPED_DOC
 
 
-def test_a_run_with_a_request_extracts_only_from_its_scope(monkeypatch):
-    monkeypatch.setattr(table, "read_structured", lambda schema, messages, model, max_tokens: table.ScopedParts(parts=[2]))
-    read = []
-    monkeypatch.setattr(table, "extract_one", lambda text, columns, model, request: read.append(text) or fake_rows([]))
-
-    table.run(SCOPED_DOC, COLUMNS, None, request="katalog")
-
-    assert read == [SCOPED_DOC[2]["text"]]
+def test_part_titles_name_each_run_of_chunks_under_one_heading_once():
+    assert table.part_titles(SCOPED_DOC) == ["Landasan hukum", "Katalog website", "Kontak"]
+    assert table.part_titles([{"id": "f:0", "text": "x", "headings": []}]) == ["-"]

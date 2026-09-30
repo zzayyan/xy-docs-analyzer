@@ -99,6 +99,8 @@ class ProposeRequest(BaseModel):
 class TableRequest(BaseModel):
     request: str
     columns: list[Column]
+    # Skip the scope pass and read every chunk: the user saw the scoped run miss something
+    read_all: bool = False
 
 
 class Region(BaseModel):
@@ -159,6 +161,10 @@ class TableExtraction(BaseModel):
     error: str | None = None
     chunks_done: int | None = None
     chunks_total: int | None = None
+    # What the run read: the headings of the parts it chose, out of how many chunks the document has
+    read_parts: list[str] | None = None
+    document_chunks: int | None = None
+    read_all: bool = False
     created_at: int
     updated_at: int
 
@@ -325,6 +331,21 @@ def delete_document(doc_id: str) -> None:
     store.delete_file(doc_id)
 
 
+@app.post("/documents/{doc_id}/retry", response_model=Document)
+def retry_document(doc_id: str, background: BackgroundTasks) -> dict:
+    """Ingest a failed Document again from its kept Original, so a failure late in a long ingest (or a
+    server restart mid-way) costs a retry, not a re-upload."""
+    file = get_file(doc_id)
+    if file["status"] != "error":
+        raise HTTPException(status_code=409, detail=f"only a failed document can be retried (status: {file['status']})")
+    path = original_path(doc_id)
+    if path is None:
+        raise HTTPException(status_code=409, detail="original not kept for this document, upload it again")
+    store.reset_ingest(doc_id)
+    background.add_task(ingest, doc_id, str(path))
+    return {**get_file(doc_id), "has_original": True}
+
+
 @app.get("/documents/{doc_id}/sections", response_model=list[Section])
 def document_sections(doc_id: str) -> list[dict]:
     get_file(doc_id)
@@ -337,7 +358,9 @@ def document_section_chunks(doc_id: str, section_id: str) -> list[dict]:
     return store.section_chunks(doc_id, section_id)
 
 
-def extract_table(doc_id: str, table_id: str, request: str, columns: list[dict], model: str | None) -> None:
+def extract_table(
+    doc_id: str, table_id: str, request: str, columns: list[dict], model: str | None, read_all: bool = False,
+) -> None:
     """The run itself, as a background task: minutes of LLM calls over every chunk, with its progress
     and its outcome kept on the TableExtraction so the user can leave the tab and come back.
 
@@ -352,8 +375,14 @@ def extract_table(doc_id: str, table_id: str, request: str, columns: list[dict],
         return extraction is None or extraction["status"] == "cancelled"
 
     try:
-        chunks = store.list_chunks(doc_id)
-        store.set_table_extraction(table_id, status="running", chunks_done=0, chunks_total=len(chunks))
+        document = store.list_chunks(doc_id)
+        # Scoped to the parts that answer the request unless the user asked for everything (docs/adr/0004);
+        # what was read is kept on the run, so a user can see what it skipped and re-run it on everything
+        chunks = document if read_all else table.scope(request, document, model)
+        store.set_table_extraction(
+            table_id, status="running", chunks_done=0, chunks_total=len(chunks),
+            read_parts=table.part_titles(chunks), document_chunks=len(document),
+        )
         rows = run_table(chunks, columns, model, on_progress=progress, should_stop=cancelled, request=request)
         store.set_table_extraction(
             # A row's id is its position when the run finished; deleting a row never renumbers the rest
@@ -422,8 +451,8 @@ def create_table_extraction(doc_id: str, body: TableRequest, background: Backgro
     # model, and a user who clicks twice means "start it", not "start it twice".
     if any(e["status"] in IN_FLIGHT for e in store.list_table_extractions(doc_id)):
         raise HTTPException(status_code=409, detail="a table extraction is already running for this document")
-    extraction = store.create_table_extraction(doc_id, body.request, columns)
-    background.add_task(extract_table, doc_id, extraction["id"], body.request, columns, file.get("llm_model"))
+    extraction = store.create_table_extraction(doc_id, body.request, columns, read_all=body.read_all)
+    background.add_task(extract_table, doc_id, extraction["id"], body.request, columns, file.get("llm_model"), body.read_all)
     return extraction
 
 

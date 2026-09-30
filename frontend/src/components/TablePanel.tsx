@@ -66,6 +66,17 @@ export function TablePanel({ docId }: { docId: string }) {
     onError: fail,
   });
 
+  // The same table again over every chunk, for a scoped run that read too little (docs/adr/0004)
+  const readAllMutation = useMutation({
+    mutationFn: (extraction: TableExtraction) => api.createTable(docId, extraction.request, extraction.columns, true),
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ['tables', docId] });
+      setOpenId(created.id);
+      setSelected(null);
+    },
+    onError: fail,
+  });
+
   const cancelMutation = useMutation({
     mutationFn: (tableId: string) => api.cancelTable(docId, tableId),
     onSuccess: (cancelled) => queryClient.setQueryData(['table', docId, cancelled.id], cancelled),
@@ -134,6 +145,8 @@ export function TablePanel({ docId }: { docId: string }) {
               cancelling={cancelMutation.isPending}
               onDelete={() => setConfirmDelete(true)}
               onDeleteRow={(rowId) => deleteRowMutation.mutate({ tableId: open.id, rowId })}
+              onReadAll={() => readAllMutation.mutate(open)}
+              readingAll={readAllMutation.isPending}
               exportUrl={api.tableExportUrl(docId, open.id)}
             />
           ) : (
@@ -350,6 +363,8 @@ interface ExtractionViewProps {
   cancelling: boolean;
   onDelete: () => void;
   onDeleteRow: (rowId: string) => void;
+  onReadAll: () => void;
+  readingAll: boolean;
   exportUrl: string;
 }
 
@@ -363,10 +378,19 @@ function ExtractionView({
   cancelling,
   onDelete,
   onDeleteRow,
+  onReadAll,
+  readingAll,
   exportUrl,
 }: ExtractionViewProps) {
   const { t } = useLang();
   const names = extraction.columns.map((c) => c.name);
+  const parts = extraction.read_parts ?? [];
+  const scoped =
+    extraction.status === 'done' &&
+    !extraction.read_all &&
+    extraction.document_chunks !== null &&
+    extraction.chunks_total !== null &&
+    extraction.chunks_total < extraction.document_chunks;
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -409,6 +433,28 @@ function ExtractionView({
             </button>
           </div>
         </Alert>
+      )}
+
+      {scoped && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            gap: 6,
+            padding: '10px 12px',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--surface-subtle)',
+            fontSize: 'var(--fs-ui-xs)',
+            color: 'var(--text-muted)',
+          }}
+        >
+          <span>{t.tableReadScope(parts.length, extraction.chunks_total ?? 0, extraction.document_chunks ?? 0)}</span>
+          <span style={{ color: 'var(--text-title)' }}>{parts.join(' · ')}</span>
+          <button className="quiet-button" onClick={onReadAll} disabled={readingAll}>
+            {t.tableReadAll}
+          </button>
+        </div>
       )}
 
       {extraction.status === 'done' &&

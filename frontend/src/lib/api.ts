@@ -121,6 +121,10 @@ export interface TableExtraction {
   error: string | null;
   chunks_done: number | null;
   chunks_total: number | null;
+  /** Headings of the parts the run read, out of document_chunks: fewer when it was scoped (docs/adr/0004) */
+  read_parts: string[] | null;
+  document_chunks: number | null;
+  read_all: boolean;
   created_at: number;
   updated_at: number;
 }
@@ -202,6 +206,8 @@ export const api = {
 
   deleteDocument: (id: string) => request<void>(`/documents/${id}`, { method: 'DELETE' }),
 
+  retryDocument: (id: string) => request<Document>(`/documents/${id}/retry`, { method: 'POST' }),
+
   listSections: (id: string) => request<Section[]>(`/documents/${id}/sections`),
 
   listSectionChunks: (id: string, sectionId: string) =>
@@ -221,11 +227,11 @@ export const api = {
   suggestTables: (docId: string) =>
     request<{ tables: SuggestedTable[] }>(`/documents/${docId}/tables/suggest`, { method: 'POST' }),
 
-  createTable: (docId: string, tableRequest: string, columns: Column[]) =>
+  createTable: (docId: string, tableRequest: string, columns: Column[], readAll = false) =>
     request<TableExtraction>(`/documents/${docId}/tables`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request: tableRequest, columns }),
+      body: JSON.stringify({ request: tableRequest, columns, read_all: readAll }),
     }),
 
   cancelTable: (docId: string, tableId: string) =>

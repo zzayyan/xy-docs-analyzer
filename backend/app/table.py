@@ -193,6 +193,11 @@ def parts_of(chunks: list[dict]) -> list[list[dict]]:
     return parts
 
 
+def part_titles(chunks: list[dict]) -> list[str]:
+    """The heading of every part these chunks make up, in document order, for showing what a run read."""
+    return [" / ".join(part[0].get("headings") or []) or "-" for part in parts_of(chunks)]
+
+
 def scope(request: str, chunks: list[dict], model: str | None) -> list[dict]:
     """The chunks a table has to be read from, chosen once with the whole document in view.
 
@@ -319,13 +324,12 @@ def run(
     Rows keep chunk order, and a chunk the model fails on fails the whole run: a partial table would
     silently claim to cover the whole document. should_stop is asked before each chunk's rows are
     taken, and raises Stopped -- that is how a user cancels a run that has minutes left. Items found in
-    more than one chunk are merged at the end (merge_rows).
+    more than one chunk are merged at the end (merge_rows). The caller decides which chunks to pass: all
+    of them, or the scope() of the request.
 
     A value the chunk does not state word for word is blanked (see quoted), and a row left with no
     value at all is dropped: measured on Qwen3.5-4B, a status the passage never gives was filled in on
     nearly every row, and headings came back as rows of blanks."""
-    if request:
-        chunks = scope(request, chunks, model)
     rows: list[dict] = []
     # One HTTP call per chunk, so it parallelises; map() keeps chunk order however the calls
     # interleave. Closing its iterator (on Stopped, or on a chunk the model failed twice on) cancels

@@ -27,9 +27,9 @@ def stubbed(monkeypatch):
     """An in-memory stand-in for the Table Extractions of one document."""
     tables: dict[str, dict] = {}
 
-    def create_table_extraction(file_id: str, request: str, columns: list[dict]) -> dict:
+    def create_table_extraction(file_id: str, request: str, columns: list[dict], read_all: bool = False) -> dict:
         row = {"id": "e1", "request": request, "columns": columns, "rows": [], "status": "queued",
-               "progress": 0.0, "error": None, "created_at": 1, "updated_at": 1}
+               "progress": 0.0, "error": None, "created_at": 1, "updated_at": 1, "read_all": read_all}
         tables[row["id"]] = row
         return row
 
@@ -43,6 +43,8 @@ def stubbed(monkeypatch):
     monkeypatch.setattr(store_module, "list_chunks", list_chunks)
     monkeypatch.setattr(store_module, "chunk_reads", reads, raising=False)
     monkeypatch.setattr(store_module, "create_table_extraction", create_table_extraction)
+    # The scope pass is one more model call; these tests read the whole document unless they say otherwise
+    monkeypatch.setattr(table_module, "scope", lambda request, chunks, model: chunks)
     def set_table_extraction(table_id: str, when_running: bool = False, **props) -> None:
         if not when_running or tables[table_id]["status"] == "running":
             tables[table_id].update(props)
@@ -332,3 +334,29 @@ def test_document_text_exports_as_text_never_as_a_formula_or_a_broken_workbook(f
     assert response.status_code == 200
     row = list(openpyxl.load_workbook(io.BytesIO(response.content)).active.iter_rows())[1]
     assert [(cell.value, cell.data_type) for cell in row[:2]] == [('=HYPERLINK("http://x","klik")', "s"), ("31Jan", "s")]
+
+
+def test_a_run_records_the_parts_it_read_out_of_the_whole_document(stubbed, monkeypatch):
+    two_parts = [{"id": "f:0", "text": "a", "pages": [1], "headings": ["Landasan"]},
+                 {"id": "f:1", "text": "b", "pages": [2], "headings": ["Katalog"]}]
+    monkeypatch.setattr(store_module, "list_chunks", lambda file_id, limit=None: two_parts)
+    monkeypatch.setattr(table_module, "scope", lambda request, chunks, model: chunks[:1])
+    read = []
+    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop, request: read.append(chunks) or [])
+
+    client.post("/documents/d1/tables", json={"request": "landasan hukum", "columns": COLUMNS})
+
+    saved = client.get("/documents/d1/tables/e1").json()
+    assert read == [two_parts[:1]]
+    assert (saved["read_parts"], saved["chunks_total"], saved["document_chunks"]) == (["Landasan"], 1, 2)
+
+
+def test_read_all_skips_the_scope_and_reads_every_chunk(stubbed, monkeypatch):
+    monkeypatch.setattr(table_module, "scope", lambda *a: pytest.fail("a read-all run was scoped"))
+    monkeypatch.setattr(api_module, "run_table", lambda chunks, columns, model, on_progress, should_stop, request: [])
+
+    client.post("/documents/d1/tables", json={"request": "q", "columns": COLUMNS, "read_all": True})
+
+    saved = client.get("/documents/d1/tables/e1").json()
+    assert saved["read_all"] is True
+    assert saved["document_chunks"] == saved["chunks_total"] == 1
