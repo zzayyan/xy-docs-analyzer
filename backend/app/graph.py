@@ -1,9 +1,11 @@
 import json
 import operator
 import re
+from itertools import zip_longest
 from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.ingest.convert import tokenizer
@@ -17,7 +19,7 @@ class State(TypedDict, total=False):
     mode: str  # "short" | "long"
     model: str | None  # the document's chosen LLM, or None for settings.llm_model
     history: list[dict]  # prior {question, answer} turns, oldest first
-    search_query: str  # question rewritten standalone against history, for retrieval only
+    search_queries: list[str]  # the question as 1-3 standalone search queries, for retrieval only
     retrieved: Annotated[list[dict], operator.add]  # parallel retrievers append here
     contexts: list[dict]  # deduplicated, budgeted input for generate
     answer: str
@@ -29,18 +31,54 @@ SYSTEM_PROMPT = (
     "Answer in the same language as the question."
 )
 
+MAX_SUB_QUERIES = 3
+
 CONTEXTUALIZE_SYSTEM_PROMPT = (
-    "Rewrite the latest question as a standalone question that makes sense without the earlier "
-    "conversation. Resolve pronouns and references like \"that\", \"the second one\", or \"the "
-    "third one\" using the conversation history -- if the previous answer contains a numbered or "
-    "bulleted list, an ordinal reference points at that specific item: pull its actual content "
-    "into the rewrite, don't just describe it as \"the Nth item\". If the question is already "
-    "standalone, return it unchanged. Reply with only the rewritten question, no explanation, no "
-    "quotes.\n\n"
-    "Example -- previous answer contains \"3. Structured content yields big gains\"; latest "
-    "question is \"what about the third one?\" -- rewrite to: \"What does it mean that structured "
-    "content yields big gains?\""
+    "You turn the latest question into search queries for a document. Write every query in the SAME "
+    "language as the latest question: an English question gives English queries, an Indonesian "
+    "question gives Indonesian queries, whatever language the examples below are in. Follow these "
+    "rules in order.\n"
+    "1. Make it standalone, so it makes sense without the earlier conversation: resolve pronouns and "
+    "references like \"that\", \"the second one\", or \"the third one\" using the conversation history "
+    "-- if the previous answer contains a numbered or bulleted list, an ordinal reference points at "
+    "that specific item: put its actual content in the query, don't just say \"the Nth item\".\n"
+    "2. A comparison ALWAYS becomes one question per thing being compared. That is any question with "
+    "\"bandingkan\", \"perbandingan\", \"perbedaan\", \"beda\", \"lebih ... dari\", \"compare\", "
+    "\"comparison\", \"difference\", \"versus\", \"vs\", or \"X or Y, which\". Each question names "
+    "exactly ONE of the things and asks ALL the aspects the user asked about for that one thing, "
+    "together in one question: split by thing, never by aspect. The "
+    "comparison word never appears in them: \"perbedaan X\" or \"compare X\" is not a question about X. "
+    "When no aspect is named (\"apa perbedaan X dan Y\", \"bandingkan keduanya\"), ask what the "
+    "document says about each one.\n"
+    "3. A question about several unrelated topics joined by \"dan\", \"serta\", \"and\" also becomes "
+    "one question per topic.\n"
+    f"4. Never more than {MAX_SUB_QUERIES} questions. A question about one thing stays one question, "
+    "unchanged if it is already standalone.\n"
+    "5. Keep the language of the question. Never answer it, add facts, or add topics it does not ask "
+    "about.\n\n"
+    "Examples:\n"
+    "- History has \"3. Structured content yields big gains\"; \"what about the third one?\" -> "
+    "[\"What does it mean that structured content yields big gains?\"]\n"
+    "- \"Bandingkan akurasi dan kecepatan model A dengan model B\" -> [\"Berapa akurasi dan kecepatan "
+    "model A?\", \"Berapa akurasi dan kecepatan model B?\"]\n"
+    "- \"Apa perbedaan Perda 13/2018 dan Perda 3/2023?\" -> [\"Apa yang dijelaskan tentang Perda "
+    "13/2018?\", \"Apa yang dijelaskan tentang Perda 3/2023?\"]\n"
+    "- History lists \"1. Paket A 2. Paket B\"; \"bandingkan keduanya\" -> [\"Apa yang dijelaskan "
+    "tentang Paket A?\", \"Apa yang dijelaskan tentang Paket B?\"]\n"
+    "- \"Mana yang lebih murah, paket A atau paket B?\" -> [\"Berapa harga paket A?\", \"Berapa harga "
+    "paket B?\"]\n"
+    "- \"Compare the cost and duration of plan A and plan B\" -> [\"What are the cost and duration of "
+    "plan A?\", \"What are the cost and duration of plan B?\"]\n"
+    "- \"Compare the penalties for the contractor vs the client\" -> [\"What penalties apply to the "
+    "contractor?\", \"What penalties apply to the client?\"]\n"
+    "- \"Siapa kontraktornya dan kapan tenggatnya?\" -> [\"Siapa kontraktornya?\", \"Kapan "
+    "tenggatnya?\"]\n"
+    "- \"Berapa nilai kontrak proyek ini?\" -> [\"Berapa nilai kontrak proyek ini?\"]"
 )
+
+
+class SearchQueries(BaseModel):
+    queries: list[str] = Field(description=f"1 to {MAX_SUB_QUERIES} standalone search questions")
 
 CITATION_MARKER = re.compile(r"\[\d+\]")
 
@@ -72,21 +110,37 @@ def route(state: State) -> list[str]:
 
 
 def contextualize(state: State) -> dict:
-    """Resolve a follow-up question ("what about the second one?") into a standalone one before
-    retrieval runs on it -- retrieval only ever sees the raw question text, so without this a
-    follow-up that depends on the prior turn finds nothing relevant no matter how much history
-    generate() is later given to work with."""
+    """Turn the question into the queries retrieval runs on, in one call:
+
+    - a follow-up ("what about the second one?") becomes standalone -- retrieval only ever sees the
+      query text, so without this it finds nothing relevant however much history generate() gets;
+    - a compound question ("compare the value and deadline of project A and project B") becomes one
+      query per thing it asks about, so each half gets its own search instead of one blurred query.
+
+    Runs on every question, first turn included, since compound questions come first as often as not.
+    Any failure falls back to the question as asked: a worse search, never a failed answer."""
     history = recent_history(state)
-    if not history:
-        # First turn: nothing to resolve against, skip the extra LLM round trip entirely.
-        return {"search_query": state["question"]}
     transcript = "\n".join(f"Q: {h['question']}\nA: {strip_citations(h['answer'])}" for h in history)
-    message = llm(state.get("model")).invoke([
-        ("system", CONTEXTUALIZE_SYSTEM_PROMPT),
-        ("human", f"Conversation so far:\n{transcript}\n\nLatest question: {state['question']}"),
-    ])
-    rewritten = (message.content or "").strip()
-    return {"search_query": rewritten or state["question"]}
+    conversation = f"Conversation so far:\n{transcript}\n\n" if history else ""
+    try:
+        found = llm(state.get("model")).with_structured_output(SearchQueries).invoke([
+            ("system", CONTEXTUALIZE_SYSTEM_PROMPT),
+            ("human", f"{conversation}Latest question: {state['question']}"),
+        ])
+        queries = [q.strip() for q in found.queries if q and q.strip()]
+    except Exception:
+        queries = []
+    queries = list(dict.fromkeys(queries))
+    # More than the cap means it split by aspect too ("precision of A", "recall of A", "precision of B",
+    # ...), and cutting the list would silently drop one of the things compared. The question as asked
+    # still covers all of them, just less sharply, so it is the safer query.
+    if len(queries) > MAX_SUB_QUERIES:
+        queries = []
+    return {"search_queries": queries or [state["question"]]}
+
+
+def search_queries(state: State) -> list[str]:
+    return state.get("search_queries") or [state["question"]]
 
 
 def _contexts(rows: list[dict], source: str) -> list[dict]:
@@ -96,18 +150,24 @@ def _contexts(rows: list[dict], source: str) -> list[dict]:
 
 
 def vector_retrieve(state: State) -> dict:
-    query = state.get("search_query") or state["question"]
-    return {"retrieved": _contexts(vector.search(state["doc_id"], query), "vector")}
+    """One hybrid search per query (no model call, so cheap), interleaved best-first: fuse() keeps
+    blocks in this order until the token budget runs out, so every sub-question gets its top hits in
+    before any gets its tail."""
+    per_query = [vector.search(state["doc_id"], q) for q in search_queries(state)]
+    interleaved = [row for rank in zip_longest(*per_query) for row in rank if row is not None]
+    return {"retrieved": _contexts(interleaved, "vector")}
 
 
 def tree_retrieve(state: State) -> dict:
-    query = state.get("search_query") or state["question"]
+    # One model call for every sub-question: the outline is read once and sections picked for each
+    query = "\n".join(search_queries(state))
     chunks = tree_search.search(state["doc_id"], query, model=state.get("model"))
     return {"retrieved": _contexts(chunks, "tree")}
 
 
 def kg_retrieve(state: State) -> dict:
-    query = state.get("search_query") or state["question"]
+    # One entity extraction over every sub-question, rather than one call each
+    query = "\n".join(search_queries(state))
     facts, chunks = kg.search(state["doc_id"], query, model=state.get("model"))
     retrieved = _contexts(chunks, "kg")
     if facts:

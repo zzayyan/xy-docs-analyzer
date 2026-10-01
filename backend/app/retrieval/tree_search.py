@@ -23,8 +23,9 @@ LIMIT $limit
 """
 
 SYSTEM_PROMPT = (
-    "You navigate a document outline to find where a question is answered. "
-    f"Return up to {MAX_SECTIONS} section ids (the value in square brackets), most relevant first. "
+    "You navigate a document outline to find where questions are answered. "
+    f"Return up to {MAX_SECTIONS} section ids (the value in square brackets) for each question, most "
+    "relevant first. "
     "Prefer the most specific section; choose a parent only when the answer spans its children."
 )
 
@@ -40,7 +41,11 @@ def outline_line(section: dict) -> str:
 
 
 def search(file_id: str, question: str, limit: int = 12, model: str | None = None) -> list[dict]:
-    """Reasoning-based retrieval: the LLM reads the section outline and picks sections, no embeddings involved."""
+    """Reasoning-based retrieval: the LLM reads the section outline and picks sections, no embeddings involved.
+
+    question may hold several questions, one per line (a compound question split by graph.contextualize):
+    the outline is read once for all of them, and each gets up to MAX_SECTIONS sections."""
+    questions = [q for q in question.splitlines() if q.strip()] or [question]
     sections = graph().query(SECTIONS_QUERY, {"file_id": file_id})
     if not sections:
         return []
@@ -49,12 +54,12 @@ def search(file_id: str, question: str, limit: int = 12, model: str | None = Non
     outline = "\n".join(outline_line(s) for s in sections)
     choice = llm(model).with_structured_output(SectionChoice).invoke([
         ("system", SYSTEM_PROMPT),
-        ("human", f"Outline:\n{outline}\n\nQuestion: {question}"),
+        ("human", f"Outline:\n{outline}\n\nQuestions:\n" + "\n".join(f"- {q}" for q in questions)),
     ])
 
     valid_ids = {s["id"] for s in sections}
     section_ids = [f"{file_id}:{sid.strip('[] ')}" for sid in choice.section_ids]
-    section_ids = [sid for sid in dict.fromkeys(section_ids) if sid in valid_ids][:MAX_SECTIONS]
+    section_ids = [sid for sid in dict.fromkeys(section_ids) if sid in valid_ids][: MAX_SECTIONS * len(questions)]
     if not section_ids:
         return []
     return graph().query(CHUNKS_QUERY, {"section_ids": section_ids, "limit": limit})
