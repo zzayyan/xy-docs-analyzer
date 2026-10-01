@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, type Citation, type Region } from '../lib/api';
 import { useLang } from '../lib/i18n';
+import { highlightStyle } from '../lib/citations';
+import { DocumentViewer } from './DocumentViewer';
 
 const SOURCE_LABEL_KEY = {
   vector: 'citationSourceVector',
@@ -18,25 +20,33 @@ export function SourcePanel({
   citation,
   onClose,
   pulse = false,
+  citations = [],
 }: {
   docId: string;
   citation: Citation;
   onClose: () => void;
   /** Opened by "follow sources" during a streaming answer: the highlight pulses and scrolls in smoothly */
   pulse?: boolean;
+  /** The citations this one came with (one answer's, one row's, one entity's), to step through in the
+   * document viewer */
+  citations?: Citation[];
 }) {
   const { t } = useLang();
   // Same query key ChatPanel already uses for its own reasons, so this reads from cache there instead
   // of firing a second request; TablePanel, which fetches no document today, gets this one for free.
   const doc = useQuery({ queryKey: ['document', docId], queryFn: () => api.getDocument(docId) }).data;
 
+  const [viewing, setViewing] = useState(false);
+
   useEffect(() => {
+    // Escape in the document viewer closes only the viewer
+    if (viewing) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, [onClose, viewing]);
 
   const rows: [string, string][] = [
     [t.citationSource, t[SOURCE_LABEL_KEY[citation.source]]],
@@ -47,6 +57,11 @@ export function SourcePanel({
   // Non-PDF Documents, Documents without a kept Original, and a citation whose chunk predates
   // Highlights (no regions) all keep the plain text view -- unconditionally, no migration needed.
   const showPage = !!doc?.has_original && doc.name.toLowerCase().endsWith('.pdf') && citation.regions.length > 0;
+  const canView = showPage && !!doc.page_count;
+  // The viewer steps through the siblings that point somewhere in the document, this one included
+  const withRegions = citations.filter((c) => c.regions.length > 0);
+  const startIndex = withRegions.findIndex((c) => c.chunk_id === citation.chunk_id && c.n === citation.n);
+  const viewerCitations = startIndex >= 0 ? withRegions : [citation];
 
   return (
     // Delimited, not concatenated: chunk_id ends in digits, so "f:1"+"23" and "f:12"+"3" would collide,
@@ -64,9 +79,16 @@ export function SourcePanel({
         }}
       >
         <span style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-title)' }}>{t.citationTitle(citation.n)}</span>
-        <button className="quiet-button" onClick={onClose}>
-          {t.citationClose}
-        </button>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {canView && (
+            <button className="quiet-button" onClick={() => setViewing(true)}>
+              {t.viewerOpen}
+            </button>
+          )}
+          <button className="quiet-button" onClick={onClose}>
+            {t.citationClose}
+          </button>
+        </div>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 20px 24px' }}>
@@ -80,7 +102,12 @@ export function SourcePanel({
         </dl>
 
         {showPage ? (
-          <PageHighlightView docId={docId} regions={citation.regions} pulse={pulse} />
+          <PageHighlightView
+            docId={docId}
+            regions={citation.regions}
+            pulse={pulse}
+            onOpen={canView ? () => setViewing(true) : undefined}
+          />
         ) : (
           <p
             style={{
@@ -96,6 +123,17 @@ export function SourcePanel({
           </p>
         )}
       </div>
+
+      {viewing && doc?.page_count && (
+        <DocumentViewer
+          docId={docId}
+          name={doc.name}
+          pageCount={doc.page_count}
+          citations={viewerCitations}
+          startIndex={Math.max(startIndex, 0)}
+          onClose={() => setViewing(false)}
+        />
+      )}
     </aside>
   );
 }
@@ -103,7 +141,18 @@ export function SourcePanel({
 /** The Original's page with every region of the cited Chunk marked as a Highlight, and page
  * navigation when the Chunk spans several. A child of SourcePanel's keyed <aside>: that key resets
  * this component's state whenever the citation changes, so "current page" needs no effect to reset. */
-function PageHighlightView({ docId, regions, pulse }: { docId: string; regions: Region[]; pulse: boolean }) {
+function PageHighlightView({
+  docId,
+  regions,
+  pulse,
+  onOpen,
+}: {
+  docId: string;
+  regions: Region[];
+  pulse: boolean;
+  /** Opens the whole document; the page becomes a button for it */
+  onOpen?: () => void;
+}) {
   const { t } = useLang();
   const pages = [...new Set(regions.map((r) => r.page))].sort((a, b) => a - b);
   const [page, setPage] = useState(pages[0]);
@@ -136,7 +185,20 @@ function PageHighlightView({ docId, regions, pulse }: { docId: string; regions: 
         </div>
       )}
 
-      <div style={{ position: 'relative' }}>
+      <div
+        style={{ position: 'relative', cursor: onOpen ? 'zoom-in' : undefined }}
+        role={onOpen ? 'button' : undefined}
+        tabIndex={onOpen ? 0 : undefined}
+        aria-label={onOpen ? t.viewerOpen : undefined}
+        title={onOpen ? t.viewerOpen : undefined}
+        onClick={onOpen}
+        onKeyDown={(e) => {
+          if (onOpen && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            onOpen();
+          }
+        }}
+      >
         <img
           src={api.pageImageUrl(docId, page)}
           alt=""
@@ -149,17 +211,7 @@ function PageHighlightView({ docId, regions, pulse }: { docId: string; regions: 
             key={i}
             ref={i === 0 ? firstHighlightRef : undefined}
             className={pulse ? 'highlight-pulse' : undefined}
-            style={{
-              position: 'absolute',
-              pointerEvents: 'none',
-              borderRadius: 'var(--radius-sm)',
-              border: '1px solid var(--brand-accent)',
-              background: 'color-mix(in srgb, var(--brand-accent) 28%, transparent)',
-              left: `${(100 * r.l) / r.page_width}%`,
-              top: `${(100 * r.t) / r.page_height}%`,
-              width: `${(100 * (r.r - r.l)) / r.page_width}%`,
-              height: `${(100 * (r.b - r.t)) / r.page_height}%`,
-            }}
+            style={highlightStyle(r)}
           />
         ))}
       </div>

@@ -21,6 +21,8 @@ const STATUS_NODE_KEY = {
 interface Selected {
   key: string;
   citation: Citation;
+  /** The answer's other citations, to step through in the document viewer */
+  citations: Citation[];
   /** Opened by "follow sources" while the answer streams, not by the user: its highlight pulses */
   auto?: boolean;
 }
@@ -67,6 +69,8 @@ export function ChatPanel({ docId }: { docId: string }) {
   // The finished answer's citation order: an answer often streams in a few seconds while following it
   // takes FOLLOW_DWELL_MS per source, so the follow carries on through it after the stream has ended
   const [finishedCited, setFinishedCited] = useState<Citation[]>([]);
+  // ...and all its citations, for the document viewer to step through once the stream state is gone
+  const [finishedCitations, setFinishedCitations] = useState<Citation[]>([]);
   const lastShownAt = useRef(0);
 
   const [modelOverride, setModelOverride] = useState<string | null>(null);
@@ -91,10 +95,12 @@ export function ChatPanel({ docId }: { docId: string }) {
   const stream = useChatStream(docId, {
     onDone: () => {
       setFinishedCited(cited);
+      setFinishedCitations(stream.state.citations);
       settle();
     },
     onError: (message) => {
       setFinishedCited(cited);
+      setFinishedCitations(stream.state.citations);
       setToast(message);
       settle();
     },
@@ -132,16 +138,17 @@ export function ChatPanel({ docId }: { docId: string }) {
 
   const cited = citedOrder(stream.state.answer, stream.state.citations);
   const next = following ? (streaming ? cited : finishedCited)[shownCount] : undefined;
+  const nextSiblings = streaming ? stream.state.citations : finishedCitations;
   useEffect(() => {
     if (!next) return;
     const wait = shownCount === 0 ? 0 : Math.max(0, lastShownAt.current + FOLLOW_DWELL_MS - Date.now());
     const timer = setTimeout(() => {
       lastShownAt.current = Date.now();
       setShownCount((count) => count + 1);
-      setSelected({ key: `live:${next.n}`, citation: next, auto: true });
+      setSelected({ key: `live:${next.n}`, citation: next, citations: nextSiblings, auto: true });
     }, wait);
     return () => clearTimeout(timer);
-  }, [next, shownCount]);
+  }, [next, shownCount, nextSiblings]);
 
   // A followed source should appear at once, so every cited page is fetched as soon as the sources are
   // known; page images are cached immutable, so the jump later is served from cache.
@@ -161,7 +168,9 @@ export function ChatPanel({ docId }: { docId: string }) {
 
   const select = (key: string, citation: Citation) => {
     setFollowing(false);
-    setSelected((current) => (current?.key === key ? null : { key, citation }));
+    const scope = key.slice(0, key.lastIndexOf(':'));
+    const citations = turns.find((turn) => turn.id === scope)?.citations ?? stream.state.citations;
+    setSelected((current) => (current?.key === key ? null : { key, citation, citations }));
   };
 
   const showEmpty = turnsQuery.isSuccess && turns.length === 0 && pendingQuestion === null;
@@ -233,6 +242,7 @@ export function ChatPanel({ docId }: { docId: string }) {
         <SourcePanel
           docId={docId}
           citation={selected.citation}
+          citations={selected.citations}
           pulse={selected.auto}
           onClose={() => {
             setFollowing(false);

@@ -395,7 +395,7 @@ export function GraphPanel({ docId }: { docId: string }) {
 
       {selectedKey !== null &&
         (citation ? (
-          <SourcePanel docId={docId} citation={citation} onClose={() => setCitation(null)} />
+          <SourcePanel docId={docId} citation={citation} citations={detailQuery.data?.citations} onClose={() => setCitation(null)} />
         ) : (
           <EntityPanel
             entityKey={selectedKey}

@@ -75,3 +75,16 @@ def test_a_non_pdf_original_is_404(ingested):
     doc_id = response.json()["doc_id"]
 
     assert client.get(f"/documents/{doc_id}/original/pages/1").status_code == 404
+
+
+def test_a_pdf_original_reports_its_page_count_for_the_document_viewer(ingested):
+    doc_id = upload_pdf(pages=3)
+    assert client.get(f"/documents/{doc_id}").json()["page_count"] == 3
+
+
+def test_a_non_pdf_or_missing_original_has_no_page_count(ingested, monkeypatch):
+    doc_id = client.post("/documents", files={"file": ("notes.md", b"# hi", "text/markdown")}).json()["doc_id"]
+    assert client.get(f"/documents/{doc_id}").json()["page_count"] is None
+
+    monkeypatch.setattr(store_module, "get_file", lambda doc_id: {"id": doc_id, "name": "old.pdf", "status": "done", "progress": 1.0})
+    assert client.get("/documents/old").json()["page_count"] is None

@@ -29,7 +29,7 @@ export function TablePanel({ docId }: { docId: string }) {
   const [request, setRequest] = useState('');
   const [columns, setColumns] = useState<Column[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [selected, setSelected] = useState<{ key: string; citation: Citation } | null>(null);
+  const [selected, setSelected] = useState<{ key: string; citation: Citation; citations: Citation[] } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -127,8 +127,8 @@ export function TablePanel({ docId }: { docId: string }) {
     setSelected(null);
   };
 
-  const select = (key: string, citation: Citation) =>
-    setSelected((current) => (current?.key === key ? null : { key, citation }));
+  const select = (key: string, citation: Citation, citations: Citation[]) =>
+    setSelected((current) => (current?.key === key ? null : { key, citation, citations }));
 
   return (
     <div className="chat-layout" data-sources={selected !== null}>
@@ -221,7 +221,9 @@ export function TablePanel({ docId }: { docId: string }) {
         </div>
       </div>
 
-      {selected && <SourcePanel docId={docId} citation={selected.citation} onClose={() => setSelected(null)} />}
+      {selected && (
+        <SourcePanel docId={docId} citation={selected.citation} citations={selected.citations} onClose={() => setSelected(null)} />
+      )}
 
       <ConfirmDialog
         open={confirmDelete}
@@ -356,7 +358,8 @@ function RunProgress({
 interface ExtractionViewProps {
   extraction: TableExtraction;
   selectedKey: string | null;
-  onSelect: (key: string, citation: Citation) => void;
+  /** citations: the row's own, which the document viewer steps through */
+  onSelect: (key: string, citation: Citation, citations: Citation[]) => void;
   onStartOver: () => void;
   onNew: () => void;
   onCancel: () => void;
@@ -483,7 +486,7 @@ function ExtractionView({
                           key={key}
                           className="chip"
                           aria-pressed={selectedKey === key}
-                          onClick={() => onSelect(key, citation)}
+                          onClick={() => onSelect(key, citation, row.citations)}
                         >
                           <span style={{ color: 'var(--brand-primary)', fontWeight: 'var(--fw-semibold)' }}>
                             {citation.pages.length > 0 ? `p. ${citation.pages[0]}` : citation.n}

@@ -89,6 +89,13 @@ export interface Dict {
   citationPageOf: (i: number, n: number) => string;
   citationPrevPage: string;
   citationNextPage: string;
+  viewerOpen: string;
+  viewerZoomIn: string;
+  viewerZoomOut: string;
+  viewerGoToPage: string;
+  viewerCitationOf: (i: number, n: number) => string;
+  viewerPrevCitation: string;
+  viewerNextCitation: string;
 
   tabChat: string;
   tabOutline: string;
@@ -238,6 +245,13 @@ const en: Dict = {
   citationPageOf: (i, n) => `Page ${i} of ${n}`,
   citationPrevPage: 'Previous page',
   citationNextPage: 'Next page',
+  viewerOpen: 'View document',
+  viewerZoomIn: 'Zoom in',
+  viewerZoomOut: 'Zoom out',
+  viewerGoToPage: 'Go to page',
+  viewerCitationOf: (i, n) => `Citation ${i} of ${n}`,
+  viewerPrevCitation: 'Previous citation',
+  viewerNextCitation: 'Next citation',
 
   tabChat: 'Chat',
   tabOutline: 'Outline',
@@ -391,6 +405,13 @@ const id: Dict = {
   citationPageOf: (i, n) => `Halaman ${i} dari ${n}`,
   citationPrevPage: 'Halaman sebelumnya',
   citationNextPage: 'Halaman berikutnya',
+  viewerOpen: 'Lihat dokumen',
+  viewerZoomIn: 'Perbesar',
+  viewerZoomOut: 'Perkecil',
+  viewerGoToPage: 'Ke halaman',
+  viewerCitationOf: (i, n) => `Sitasi ${i} dari ${n}`,
+  viewerPrevCitation: 'Sitasi sebelumnya',
+  viewerNextCitation: 'Sitasi berikutnya',
 
   tabChat: 'Chat',
   tabOutline: 'Daftar Isi',

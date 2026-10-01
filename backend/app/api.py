@@ -90,6 +90,8 @@ class Document(BaseModel):
     step_total: int | None = None
     llm_model: str | None = None
     has_original: bool = False
+    # Pages in a PDF Original, for the document viewer; only on GET /documents/{id}, never on the list
+    page_count: int | None = None
 
 
 class ProposeRequest(BaseModel):
@@ -287,7 +289,10 @@ def list_documents() -> list[dict]:
 
 @app.get("/documents/{doc_id}", response_model=Document)
 def document_status(doc_id: str) -> dict:
-    return {**get_file(doc_id), "has_original": original_path(doc_id) is not None}
+    file = get_file(doc_id)
+    path = original_path(doc_id)
+    is_pdf = path is not None and mimetypes.guess_type(path)[0] == "application/pdf"
+    return {**file, "has_original": path is not None, "page_count": page_count(path) if is_pdf else None}
 
 
 @app.get("/documents/{doc_id}/original")

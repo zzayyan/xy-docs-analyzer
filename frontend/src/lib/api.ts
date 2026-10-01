@@ -38,6 +38,8 @@ export interface Document {
   step_total: number | null;
   llm_model: string | null;
   has_original: boolean;
+  /** Pages in a PDF Original; only getDocument sends it */
+  page_count?: number | null;
 }
 
 /** One bounding box on one page of the Original -- what gets drawn as a Highlight. Top-left origin,
