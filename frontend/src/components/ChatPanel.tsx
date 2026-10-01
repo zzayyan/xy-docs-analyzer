@@ -8,6 +8,7 @@ import { SourcePanel } from './SourcePanel';
 import { Toast } from './Toast';
 import { api, ApiError, type Citation, type Turn } from '../lib/api';
 import { useChatStream, type StreamState } from '../lib/useChatStream';
+import { CITE_GROUP, citeNumbers } from '../lib/citations';
 import { useLang } from '../lib/i18n';
 
 const STATUS_NODE_KEY = {
@@ -20,6 +21,25 @@ const STATUS_NODE_KEY = {
 interface Selected {
   key: string;
   citation: Citation;
+  /** Opened by "follow sources" while the answer streams, not by the user: its highlight pulses */
+  auto?: boolean;
+}
+
+// Each followed source stays up at least this long, so "[1][2][3]" streamed in half a second does not flicker
+const FOLLOW_DWELL_MS = 1200;
+
+/** The citations a streaming answer has used so far, in the order it first cited them. Graph facts have
+ * no page to show, so they are not followed. */
+function citedOrder(answer: string, citations: Citation[]): Citation[] {
+  const byN = new Map(citations.filter((c) => c.source !== 'kg_facts').map((c) => [c.n, c]));
+  const order: Citation[] = [];
+  for (const match of answer.matchAll(CITE_GROUP)) {
+    for (const n of citeNumbers(match[1])) {
+      const citation = byN.get(n);
+      if (citation && !order.includes(citation)) order.push(citation);
+    }
+  }
+  return order;
 }
 
 /** Short hint for a source chip: the deepest heading, else a page range. */
@@ -38,6 +58,16 @@ export function ChatPanel({ docId }: { docId: string }) {
   const [selected, setSelected] = useState<Selected | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // "Follow sources": while an answer streams, the source panel moves to each source the moment the
+  // answer first cites it. followPref is the user's switch; following is whether this answer still
+  // follows -- any click on a source or the panel's close hands control back to the user.
+  const [followPref, setFollowPref] = useState(true);
+  const [following, setFollowing] = useState(false);
+  const [shownCount, setShownCount] = useState(0);
+  // The finished answer's citation order: an answer often streams in a few seconds while following it
+  // takes FOLLOW_DWELL_MS per source, so the follow carries on through it after the stream has ended
+  const [finishedCited, setFinishedCited] = useState<Citation[]>([]);
+  const lastShownAt = useRef(0);
 
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   // Shares DocumentScreen.tsx's exact query key, so this reads from cache instead of firing a
@@ -59,8 +89,12 @@ export function ChatPanel({ docId }: { docId: string }) {
     setPendingQuestion(null);
   };
   const stream = useChatStream(docId, {
-    onDone: settle,
+    onDone: () => {
+      setFinishedCited(cited);
+      settle();
+    },
     onError: (message) => {
+      setFinishedCited(cited);
       setToast(message);
       settle();
     },
@@ -87,16 +121,48 @@ export function ChatPanel({ docId }: { docId: string }) {
     if (!question || streaming) return;
     setDraft('');
     setPendingQuestion(question);
+    // Not on a narrow screen, where the source panel covers the conversation it would be following
+    const follow = followPref && !window.matchMedia('(max-width: 767px)').matches;
+    setFollowing(follow);
+    setShownCount(0);
+    setFinishedCited([]);
+    if (follow) setSelected(null);
     stream.send(question, model);
   };
+
+  const cited = citedOrder(stream.state.answer, stream.state.citations);
+  const next = following ? (streaming ? cited : finishedCited)[shownCount] : undefined;
+  useEffect(() => {
+    if (!next) return;
+    const wait = shownCount === 0 ? 0 : Math.max(0, lastShownAt.current + FOLLOW_DWELL_MS - Date.now());
+    const timer = setTimeout(() => {
+      lastShownAt.current = Date.now();
+      setShownCount((count) => count + 1);
+      setSelected({ key: `live:${next.n}`, citation: next, auto: true });
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [next, shownCount]);
+
+  // A followed source should appear at once, so every cited page is fetched as soon as the sources are
+  // known; page images are cached immutable, so the jump later is served from cache.
+  const doc = documentQuery.data;
+  const isPdf = !!doc?.has_original && doc.name.toLowerCase().endsWith('.pdf');
+  useEffect(() => {
+    if (!isPdf) return;
+    for (const c of stream.state.citations) {
+      if (c.regions.length > 0) new Image().src = api.pageImageUrl(docId, c.regions[0].page);
+    }
+  }, [stream.state.citations, isPdf, docId]);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [turns.length, pendingQuestion, stream.state.answer]);
 
-  const select = (key: string, citation: Citation) =>
+  const select = (key: string, citation: Citation) => {
+    setFollowing(false);
     setSelected((current) => (current?.key === key ? null : { key, citation }));
+  };
 
   const showEmpty = turnsQuery.isSuccess && turns.length === 0 && pendingQuestion === null;
 
@@ -141,6 +207,17 @@ export function ChatPanel({ docId }: { docId: string }) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 26, marginTop: 4, gap: 'var(--space-3)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
               <ModelSwitch value={model} onChange={setModelOverride} choices={modelsQuery.data?.models ?? []} />
+              <button
+                type="button"
+                className="chip"
+                aria-pressed={followPref}
+                onClick={() => {
+                  setFollowPref((on) => !on);
+                  setFollowing(false);
+                }}
+              >
+                {t.chatFollowSources}
+              </button>
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t.chatComposerHint}</span>
             </div>
             {turns.length > 0 && (
@@ -152,7 +229,17 @@ export function ChatPanel({ docId }: { docId: string }) {
         </div>
       </div>
 
-      {selected && <SourcePanel docId={docId} citation={selected.citation} onClose={() => setSelected(null)} />}
+      {selected && (
+        <SourcePanel
+          docId={docId}
+          citation={selected.citation}
+          pulse={selected.auto}
+          onClose={() => {
+            setFollowing(false);
+            setSelected(null);
+          }}
+        />
+      )}
 
       <ConfirmDialog
         open={confirmClear}
@@ -213,15 +300,28 @@ interface SourceSelection {
   onSelect: (key: string, citation: Citation) => void;
 }
 
-function Sources({ scope, citations, selectedKey, onSelect }: SourceSelection & { scope: string; citations: Citation[] }) {
+function Sources({
+  scope,
+  citations,
+  selectedKey,
+  onSelect,
+  stagger = false,
+}: SourceSelection & { scope: string; citations: Citation[]; stagger?: boolean }) {
   if (citations.length === 0) return null;
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-      {citations.map((c) => {
+      {citations.map((c, i) => {
         const key = `${scope}:${c.n}`;
         const label = citationShortLabel(c);
         return (
-          <button key={key} className="chip" aria-pressed={selectedKey === key} onClick={() => onSelect(key, c)} title={label}>
+          <button
+            key={key}
+            className={stagger ? 'chip chip-in' : 'chip'}
+            style={stagger ? { animationDelay: `${i * 80}ms` } : undefined}
+            aria-pressed={selectedKey === key}
+            onClick={() => onSelect(key, c)}
+            title={label}
+          >
             <span style={{ color: 'var(--brand-primary)', fontWeight: 'var(--fw-semibold)' }}>{c.n}</span>
             {label && <span className="truncate">{label}</span>}
           </button>
@@ -254,6 +354,17 @@ function LiveAnswer({ state, selectedKey, onSelect }: SourceSelection & { state:
   // Between "done" and the refetched turn arriving, the stream is already idle: render nothing
   // rather than flashing the "thinking" line again.
   if (state.status === 'idle') return null;
+  if (!state.answer && state.citations.length > 0) {
+    // Retrieval is done and the answer has not started: show what was found, as it was found
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <span className="pulse" style={{ color: 'var(--text-muted)' }}>
+          {t.chatFoundSources(state.citations.length)}
+        </span>
+        <Sources scope="live" citations={state.citations} selectedKey={selectedKey} onSelect={onSelect} stagger />
+      </div>
+    );
+  }
   if (!state.answer) {
     const key = state.statusNode && state.statusNode in STATUS_NODE_KEY ? STATUS_NODE_KEY[state.statusNode as keyof typeof STATUS_NODE_KEY] : null;
     return (

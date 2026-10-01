@@ -61,6 +61,8 @@ export interface Dict {
   chatPlaceholder: string;
   chatSend: string;
   chatSending: string;
+  chatFollowSources: string;
+  chatFoundSources: (n: number) => string;
   chatEmptyTitle: string;
   chatEmpty: string;
   chatSuggestions: string[];
@@ -208,6 +210,8 @@ const en: Dict = {
   chatPlaceholder: 'Ask about this document',
   chatSend: 'Send',
   chatSending: 'Thinking…',
+  chatFollowSources: 'Follow sources',
+  chatFoundSources: (n) => (n === 1 ? 'Found 1 source' : `Found ${n} sources`),
   chatEmptyTitle: 'Ask anything about this document',
   chatEmpty: 'Answers cite the passages they come from.',
   chatSuggestions: ['Summarize this document', 'What are the key findings?', 'List the main sections and what each covers'],
@@ -359,6 +363,8 @@ const id: Dict = {
   chatPlaceholder: 'Tanya tentang dokumen ini',
   chatSend: 'Kirim',
   chatSending: 'Memikirkan…',
+  chatFollowSources: 'Ikuti sumber',
+  chatFoundSources: (n) => `Menemukan ${n} sumber`,
   chatEmptyTitle: 'Tanyakan apa saja tentang dokumen ini',
   chatEmpty: 'Setiap jawaban menyertakan kutipan sumbernya.',
   chatSuggestions: ['Ringkas dokumen ini', 'Apa temuan utamanya?', 'Sebutkan bagian utama dan isi masing-masing'],

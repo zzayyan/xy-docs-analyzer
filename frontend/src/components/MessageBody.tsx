@@ -1,5 +1,6 @@
 import Markdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import type { Citation } from '../lib/api';
+import { CITE_GROUP, citeNumbers } from '../lib/citations';
 
 interface MessageBodyProps {
   text: string;
@@ -31,7 +32,15 @@ const listStyle = {
  * intercepts that one URL scheme to render a clickable citation pill instead of a normal link;
  * anything else falls through to a real external link. */
 export function MessageBody({ text, citations, onCitationClick }: MessageBodyProps) {
-  const withCitationLinks = text.replace(/\[(\d+)\]/g, (_match, n) => `[${n}](${CITE_PREFIX}${n})`);
+  // A grouped marker becomes one link per citation, so "[4, 5]" renders as two pills. Only when every
+  // number is a real citation: "[2021-2023]" in the answer's text is a year span and stays as written.
+  const known = new Set(citations.map((c) => c.n));
+  const withCitationLinks = text.replace(CITE_GROUP, (match, group: string) => {
+    const numbers = citeNumbers(group);
+    return numbers.length > 0 && numbers.every((n) => known.has(n))
+      ? numbers.map((n) => `[${n}](${CITE_PREFIX}${n})`).join('')
+      : match;
+  });
 
   const components: Components = {
     p: ({ children }) => <p style={{ margin: 0 }}>{children}</p>,

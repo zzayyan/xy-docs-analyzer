@@ -386,10 +386,28 @@ dialog::backdrop {
   }
 }
 
+/* ---- Follow sources ---- */
+.highlight-pulse {
+  animation: highlight-pulse 1.1s var(--ease-out) 2;
+}
+@keyframes highlight-pulse {
+  from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand-accent) 60%, transparent); }
+  to { box-shadow: 0 0 0 12px transparent; }
+}
+.chip-in {
+  animation: chip-in var(--dur-base) var(--ease-out) both;
+}
+@keyframes chip-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .skeleton-block,
   .pulse,
-  .source-panel {
+  .source-panel,
+  .highlight-pulse,
+  .chip-in {
     animation: none;
   }
 }

@@ -13,7 +13,18 @@ const SOURCE_LABEL_KEY = {
 
 /** Docked beside the conversation instead of a modal overlay, so the answer that cites it stays
  * readable while the source is open. */
-export function SourcePanel({ docId, citation, onClose }: { docId: string; citation: Citation; onClose: () => void }) {
+export function SourcePanel({
+  docId,
+  citation,
+  onClose,
+  pulse = false,
+}: {
+  docId: string;
+  citation: Citation;
+  onClose: () => void;
+  /** Opened by "follow sources" during a streaming answer: the highlight pulses and scrolls in smoothly */
+  pulse?: boolean;
+}) {
   const { t } = useLang();
   // Same query key ChatPanel already uses for its own reasons, so this reads from cache there instead
   // of firing a second request; TablePanel, which fetches no document today, gets this one for free.
@@ -69,7 +80,7 @@ export function SourcePanel({ docId, citation, onClose }: { docId: string; citat
         </dl>
 
         {showPage ? (
-          <PageHighlightView docId={docId} regions={citation.regions} />
+          <PageHighlightView docId={docId} regions={citation.regions} pulse={pulse} />
         ) : (
           <p
             style={{
@@ -92,7 +103,7 @@ export function SourcePanel({ docId, citation, onClose }: { docId: string; citat
 /** The Original's page with every region of the cited Chunk marked as a Highlight, and page
  * navigation when the Chunk spans several. A child of SourcePanel's keyed <aside>: that key resets
  * this component's state whenever the citation changes, so "current page" needs no effect to reset. */
-function PageHighlightView({ docId, regions }: { docId: string; regions: Region[] }) {
+function PageHighlightView({ docId, regions, pulse }: { docId: string; regions: Region[]; pulse: boolean }) {
   const { t } = useLang();
   const pages = [...new Set(regions.map((r) => r.page))].sort((a, b) => a - b);
   const [page, setPage] = useState(pages[0]);
@@ -131,12 +142,13 @@ function PageHighlightView({ docId, regions }: { docId: string; regions: Region[
           alt=""
           style={{ display: 'block', width: '100%', height: 'auto', borderRadius: 'var(--radius-sm)' }}
           // "opens at the first marked region": scroll it into view once the page has a real size
-          onLoad={() => firstHighlightRef.current?.scrollIntoView({ block: 'center' })}
+          onLoad={() => firstHighlightRef.current?.scrollIntoView({ block: 'center', behavior: pulse ? 'smooth' : 'auto' })}
         />
         {onPage.map((r, i) => (
           <div
             key={i}
             ref={i === 0 ? firstHighlightRef : undefined}
+            className={pulse ? 'highlight-pulse' : undefined}
             style={{
               position: 'absolute',
               pointerEvents: 'none',

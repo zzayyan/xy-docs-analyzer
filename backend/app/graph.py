@@ -80,7 +80,8 @@ CONTEXTUALIZE_SYSTEM_PROMPT = (
 class SearchQueries(BaseModel):
     queries: list[str] = Field(description=f"1 to {MAX_SUB_QUERIES} standalone search questions")
 
-CITATION_MARKER = re.compile(r"\[\d+\]")
+# "[3]", and the grouped forms models also write: "[4, 5]", "[4;5]", "[4-6]"
+CITATION_MARKER = re.compile(r"\[\d+(?:\s*[,;–-]\s*\d+)*\]")
 
 
 def strip_citations(text: str) -> str:

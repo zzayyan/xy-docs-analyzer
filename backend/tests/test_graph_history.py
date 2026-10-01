@@ -9,6 +9,11 @@ def test_strip_citations_removes_bracketed_numbers_only():
     assert graph_module.strip_citations(text) == "3. Structured content yields big gains . Also see  and item 4."
 
 
+def test_strip_citations_also_removes_grouped_markers():
+    text = "Useful for fact-checking [4, 5], audits [6;7] and reviews [8-10]."
+    assert graph_module.strip_citations(text) == "Useful for fact-checking , audits  and reviews ."
+
+
 def test_recent_history_caps_to_max_turns():
     history = [{"question": f"q{i}", "answer": f"a{i}"} for i in range(10)]
     result = graph_module.recent_history({"history": history})
