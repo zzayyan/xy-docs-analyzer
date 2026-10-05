@@ -1,4 +1,5 @@
-"""Table Extraction: a user-described table pulled out of every chunk of one document.
+"""Table Extraction: a user-described table pulled out of every chunk of one document, with the tables
+Docling recognised in it read whole (docs/adr/0005).
 
 Column proposal and the per-chunk read are both structured output over the document's own model
 (prior art: app/retrieval/kg.py). Persistence lives in app/store.py, orchestration in app/api.py."""
@@ -14,6 +15,12 @@ from app.models import llm, table_llm
 # A chunk is at most CHUNK_MAX_TOKENS long, so its rows cannot honestly need more output than this.
 # The cap is what makes a runaway cost seconds instead of minutes (measured: 7s against 110s).
 EXTRACT_MAX_TOKENS = 3000
+# A table is read whole instead of chunk by chunk (docs/adr/0005), in batches of this many rows with its
+# header repeated in each, so one table of hundreds of rows never becomes one prompt and one answer.
+TABLE_BATCH_ROWS = 40
+# A batch holds several chunks' worth of rows, and its answer can be nearly as long as the batch itself.
+# ponytail: double EXTRACT_MAX_TOKENS, not measured; size it from a real batch if a long table runs out.
+TABLE_EXTRACT_MAX_TOKENS = 2 * EXTRACT_MAX_TOKENS
 # Greedy decoding (temperature 0) repeats itself forever on some passages -- measured on Qwen3.5-4B,
 # where one chunk ran to 15968 tokens of repeated rows every time. 0.3 still ran away on 3 of 8 retries
 # of those chunks, which failed whole runs at random; 0.7 on none of 8 (see docs/adr/0001).
@@ -66,6 +73,16 @@ EXTRACT_SYSTEM = (
     "the passage writes it, in the language of the passage -- do not translate, summarise or infer. "
     "Leave a value empty when the passage does not state it; never fill it with a guess or with words "
     "like \"not stated\"."
+)
+
+TABLE_EXTRACT_SYSTEM = (
+    "You extract table rows from one table of a document, given in Markdown, for a request. It may be only "
+    "some of the table's rows, under its header. Map every row of the table that the request asks for to "
+    "the requested columns -- one row out per matching table row -- and return no rows at all if none "
+    "matches. A header or a total is not an item. Give one value per column, in the order the columns are "
+    "listed. Quote each value exactly as the table writes it, in the language of the table -- do not "
+    "translate, summarise or infer. Leave a value empty when the table does not state it; never fill it "
+    "with a guess or with words like \"not stated\"."
 )
 
 SCOPE_SYSTEM = (
@@ -239,6 +256,53 @@ def extract_one(text: str, columns: list[dict], model: str | None, request: str)
     return read_structured(ChunkRows, messages, model, EXTRACT_MAX_TOKENS)
 
 
+def extract_from_table(text: str, columns: list[dict], model: str | None, request: str) -> ChunkRows:
+    """extract_one for a batch of one table's rows (see table_batches): the same call, framed as a table."""
+    listed = "\n".join(f"{i}. {c['name']}: {c['description']}" for i, c in enumerate(columns, start=1))
+    asked = f"Request:\n{request}\n\n" if request else ""
+    messages = [("system", TABLE_EXTRACT_SYSTEM), ("human", f"{asked}Columns:\n{listed}\n\nTable:\n{text}")]
+    return read_structured(ChunkRows, messages, model, TABLE_EXTRACT_MAX_TOKENS)
+
+
+def table_batches(table: dict) -> list[str]:
+    """A table's Markdown in runs of TABLE_BATCH_ROWS rows, each under the table's caption and header."""
+    lines = table["markdown"].splitlines()
+    header, body = lines[:2], lines[2:]
+    caption = f"{table['caption']}\n\n" if table.get("caption") else ""
+    starts = range(0, len(body), TABLE_BATCH_ROWS) if body else [0]
+    return [caption + "\n".join(header + body[i:i + TABLE_BATCH_ROWS]) for i in starts]
+
+
+def units_of(chunks: list[dict]) -> list[dict]:
+    """What run() reads, in document order: each table once, whole, at the first chunk that holds it, then
+    each chunk's own text -- its prose when it holds a table, so the table's rows are not read twice.
+
+    A chunk carries its tables under "tables" (resolved from its table_ids by the caller); one ingested
+    before tables were kept has none, and is read from its text as it always was. A row read from a table
+    cites the table's pages and regions, so its Highlight is the table, under the first chunk's id. Each
+    unit records the position of the chunk it was read at, for the progress run() reports."""
+    units: list[dict] = []
+    seen: set[str] = set()
+    for position, chunk in enumerate(chunks):
+        tables = chunk.get("tables") or []
+        for table in tables:
+            if table["id"] in seen:
+                continue
+            seen.add(table["id"])
+            for text in table_batches(table):
+                units.append({"text": text, "table": True, "chunk": position, "citation": {
+                    "chunk_id": chunk["id"], "pages": table["pages"], "headings": chunk.get("headings") or [],
+                    "regions": table["regions"],
+                }})
+        text = (chunk.get("prose") or "") if tables else chunk["text"]
+        if text:
+            units.append({"text": text, "table": False, "chunk": position, "citation": {
+                "chunk_id": chunk["id"], "pages": chunk["pages"], "headings": chunk.get("headings") or [],
+                "regions": chunk.get("regions") or [],
+            }})
+    return units
+
+
 def quoted(value: str, text: str) -> bool:
     """Whether the passage states this value, word for word. Compared as words, ignoring case and
     punctuation, so a quote the model re-spaced or re-punctuated still counts; a value the passage never
@@ -321,42 +385,45 @@ def run(
 ) -> list[dict]:
     """Read every chunk and return the rows found, each citing the chunk it came from.
 
-    Rows keep chunk order, and a chunk the model fails on fails the whole run: a partial table would
-    silently claim to cover the whole document. should_stop is asked before each chunk's rows are
-    taken, and raises Stopped -- that is how a user cancels a run that has minutes left. Items found in
-    more than one chunk are merged at the end (merge_rows). The caller decides which chunks to pass: all
-    of them, or the scope() of the request.
+    A chunk's tables are read whole instead, once each, however many chunks they span (see units_of).
+    Rows keep document order, and a read the model fails on fails the whole run: a partial table would
+    silently claim to cover the whole document. should_stop is asked before each read's rows are taken,
+    and raises Stopped -- that is how a user cancels a run that has minutes left. Progress counts chunks.
+    Items found in more than one place are merged at the end (merge_rows). The caller decides which chunks
+    to pass: all of them, or the scope() of the request.
 
-    A value the chunk does not state word for word is blanked (see quoted), and a row left with no
-    value at all is dropped: measured on Qwen3.5-4B, a status the passage never gives was filled in on
+    A value the passage or table does not state word for word is blanked (see quoted), and a row left with
+    no value at all is dropped: measured on Qwen3.5-4B, a status the passage never gives was filled in on
     nearly every row, and headings came back as rows of blanks."""
+    units = units_of(chunks)
     rows: list[dict] = []
-    # One HTTP call per chunk, so it parallelises; map() keeps chunk order however the calls
-    # interleave. Closing its iterator (on Stopped, or on a chunk the model failed twice on) cancels
-    # every chunk not yet started, so neither cancelling nor failing pays for the rest of the document.
+    # One HTTP call per unit, so it parallelises; map() keeps unit order however the calls interleave.
+    # Closing its iterator (on Stopped, or on a unit the model failed twice on) cancels every unit not
+    # yet started, so neither cancelling nor failing pays for the rest of the document.
     with ThreadPoolExecutor(max_workers=settings.llm_concurrency) as pool:
-        extracted = pool.map(lambda chunk: extract_one(chunk["text"], columns, model, request), chunks)
+        extracted = pool.map(
+            lambda unit: (extract_from_table if unit["table"] else extract_one)(unit["text"], columns, model, request),
+            units,
+        )
 
-        for done, (chunk, found) in enumerate(zip(chunks, extracted), start=1):
+        for i, (unit, found) in enumerate(zip(units, extracted)):
             if should_stop and should_stop():
                 extracted.close()
                 raise Stopped()
-            citation = {
-                "n": 1, "chunk_id": chunk["id"], "pages": chunk["pages"],
-                "headings": chunk.get("headings") or [], "regions": chunk.get("regions") or [],
-                "source": "table", "text": chunk["text"],
-            }
+            citation = {"n": 1, **unit["citation"], "source": "table", "text": unit["text"]}
             for row in found.rows:
                 # The model can return fewer values than there are columns; a column it skipped is
                 # a value the document does not state, which is an empty cell rather than a shift.
-                values = [v.strip() if quoted(v, chunk["text"]) else "" for v in row.values] + [""] * len(columns)
+                values = [v.strip() if quoted(v, unit["text"]) else "" for v in row.values] + [""] * len(columns)
                 if not any(values[:len(columns)]):
                     continue
                 rows.append({
                     "values": {c["name"]: v for c, v in zip(columns, values)},
                     "citations": [dict(citation)],
                 })
-            if on_progress:
+            # Every chunk before the next unit's is fully read; after the last unit, all of them are
+            done = units[i + 1]["chunk"] if i + 1 < len(units) else len(chunks)
+            if on_progress and done > unit["chunk"]:
                 on_progress(done, len(chunks))
 
     if len(rows) < 2:

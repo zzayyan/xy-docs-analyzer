@@ -86,7 +86,7 @@ def ingest(file_id: str, path: str) -> None:
         # Stays "queued" until this upload's turn to convert comes
         with CONVERT_LOCK:
             step(file_id, status="converting", progress=0.05, step_done=0, step_total=0)
-            doc, tokens, chunks = convert(path, on_progress=progress_between(file_id, 0.05, 0.3))
+            doc, tokens, chunks, tables = convert(path, on_progress=progress_between(file_id, 0.05, 0.3))
         mode = "long" if tokens > settings.long_doc_tokens else "short"
         # embedding is one call for every chunk at once, so it has no sub-progress of its own
         step(
@@ -99,6 +99,7 @@ def ingest(file_id: str, path: str) -> None:
             **c, "id": f"{file_id}:{c['idx']}", "embedding": v,
             # A Neo4j property can't hold a list of maps, the same reason Turn.citations is JSON too
             "regions": json.dumps(c["regions"]),
+            "table_ids": [f"{file_id}:t{i}" for i in c.get("table_refs") or []],
         } for c, v in zip(chunks, vectors)]
         graph().query(
             """
@@ -106,10 +107,24 @@ def ingest(file_id: str, path: str) -> None:
             UNWIND $rows AS r
             MERGE (c:Chunk {id: r.id})
             SET c.text = r.text, c.idx = r.idx, c.pages = r.pages, c.headings = r.headings,
-                c.regions = r.regions, c.file_id = $file_id, c.embedding = r.embedding
+                c.regions = r.regions, c.file_id = $file_id, c.embedding = r.embedding,
+                c.table_ids = r.table_ids, c.prose = r.prose
             MERGE (c)-[:PART_OF]->(f)
             """,
             {"file_id": file_id, "rows": rows},
+        )
+        # CREATE, not MERGE: a retry clears the Document's DocTables first (store.RESET_INGEST)
+        graph().query(
+            """
+            MATCH (f:File {id: $file_id})
+            UNWIND $tables AS t
+            CREATE (d:DocTable {id: t.id, file_id: $file_id, idx: t.idx, caption: t.caption,
+                                markdown: t.markdown, pages: t.pages, regions: t.regions})
+            CREATE (d)-[:PART_OF]->(f)
+            """,
+            {"file_id": file_id, "tables": [
+                {**t, "id": f"{file_id}:t{t['idx']}", "regions": json.dumps(t["regions"])} for t in tables
+            ]},
         )
 
         if mode == "long":

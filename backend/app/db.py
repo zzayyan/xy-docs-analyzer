@@ -24,6 +24,7 @@ SCHEMA = [
     "CREATE INDEX section_file IF NOT EXISTS FOR (s:Section) ON (s.file_id)",
     "CREATE INDEX turn_file IF NOT EXISTS FOR (t:Turn) ON (t.file_id)",
     "CREATE INDEX table_file IF NOT EXISTS FOR (e:TableExtraction) ON (e.file_id)",
+    "CREATE INDEX doc_table_file IF NOT EXISTS FOR (t:DocTable) ON (t.file_id)",
     "CREATE FULLTEXT INDEX entity_name IF NOT EXISTS FOR (e:__Entity__) ON EACH [e.name]",
 ]
 

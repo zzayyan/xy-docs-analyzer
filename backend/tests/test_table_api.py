@@ -41,6 +41,7 @@ def stubbed(monkeypatch):
         return [{"id": "f:0", "text": "text", "pages": [1], "headings": []}]
 
     monkeypatch.setattr(store_module, "list_chunks", list_chunks)
+    monkeypatch.setattr(store_module, "list_doc_tables", lambda file_id: [])
     monkeypatch.setattr(store_module, "chunk_reads", reads, raising=False)
     monkeypatch.setattr(store_module, "create_table_extraction", create_table_extraction)
     # The scope pass is one more model call; these tests read the whole document unless they say otherwise
@@ -347,7 +348,7 @@ def test_a_run_records_the_parts_it_read_out_of_the_whole_document(stubbed, monk
     client.post("/documents/d1/tables", json={"request": "landasan hukum", "columns": COLUMNS})
 
     saved = client.get("/documents/d1/tables/e1").json()
-    assert read == [two_parts[:1]]
+    assert [[c["id"] for c in chunks] for chunks in read] == [["f:0"]]
     assert (saved["read_parts"], saved["chunks_total"], saved["document_chunks"]) == (["Landasan"], 1, 2)
 
 

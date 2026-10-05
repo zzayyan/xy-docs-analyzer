@@ -31,8 +31,15 @@ def test_a_failed_document_is_reset_and_ingested_again_from_its_original(monkeyp
     assert calls == [("reset", "d1"), ("ingest", "d1", str(path))], "cleared before the new ingest starts"
 
 
-def test_only_a_failed_document_with_its_original_can_be_retried(monkeypatch, tmp_path):
-    calls, _ = stub(monkeypatch, tmp_path, "done")
+def test_a_finished_document_can_be_ingested_again(monkeypatch, tmp_path):
+    calls, path = stub(monkeypatch, tmp_path, "done")
+
+    assert client.post("/documents/d1/retry").status_code == 200
+    assert calls == [("reset", "d1"), ("ingest", "d1", str(path))]
+
+
+def test_only_a_settled_document_with_its_original_can_be_retried(monkeypatch, tmp_path):
+    calls, _ = stub(monkeypatch, tmp_path, "converting")
     assert client.post("/documents/d1/retry").status_code == 409
 
     calls, _ = stub(monkeypatch, tmp_path, "error", original=False)

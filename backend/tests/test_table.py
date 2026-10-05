@@ -493,3 +493,94 @@ def test_scope_reads_the_whole_document_when_it_gets_no_usable_answer(monkeypatc
 def test_part_titles_name_each_run_of_chunks_under_one_heading_once():
     assert table.part_titles(SCOPED_DOC) == ["Landasan hukum", "Katalog website", "Kontak"]
     assert table.part_titles([{"id": "f:0", "text": "x", "headings": []}]) == ["-"]
+
+
+def doc_table(rows: int, table_id: str = "f:t0") -> dict:
+    body = "\n".join(f"| {i} | bayar termin {i} | {i} Mei 2027 |" for i in range(rows))
+    return {"id": table_id, "idx": 0, "caption": "Daftar kewajiban", "pages": [3, 4],
+            "regions": [{"page": 3, "l": 0, "t": 0, "r": 1, "b": 1, "page_width": 600, "page_height": 800}],
+            "markdown": f"| No | Kewajiban | Tenggat |\n|----|----|----|\n{body}"}
+
+
+def test_a_table_spread_over_two_chunks_is_read_once_whole_and_cited_as_the_table(monkeypatch):
+    spread = doc_table(3)
+    chunks = [
+        {"id": "f:0", "text": "0, Kewajiban = bayar termin 0", "prose": "Pasal 1 pembuka", "pages": [3],
+         "headings": ["Pasal 1"], "tables": [spread]},
+        {"id": "f:1", "text": "2, Kewajiban = bayar termin 2", "prose": "", "pages": [4],
+         "headings": ["Pasal 1"], "tables": [spread]},
+    ]
+    tables_read, passages_read = [], []
+    monkeypatch.setattr(table, "extract_from_table",
+                        lambda text, columns, model, request: tables_read.append(text) or fake_rows([["bayar termin 1", "1 Mei 2027"]]))
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model, request: passages_read.append(text) or fake_rows([]))
+    progress: list[tuple[int, int]] = []
+
+    rows = table.run(chunks, COLUMNS, model=None, on_progress=lambda done, total: progress.append((done, total)))
+
+    assert tables_read == ["Daftar kewajiban\n\n" + spread["markdown"]], "the table goes in once, whole, with its caption"
+    assert passages_read == ["Pasal 1 pembuka"], "a chunk holding a table is read as its prose, never its triplet text"
+    [citation] = rows[0]["citations"]
+    assert (citation["chunk_id"], citation["pages"], citation["regions"]) == ("f:0", [3, 4], spread["regions"])
+    assert progress == [(2, 2)], "progress counts chunks, done once the reads behind them are"
+
+
+def test_a_long_table_is_read_in_batches_each_under_its_header(monkeypatch):
+    long = doc_table(100)
+    read = []
+    monkeypatch.setattr(table, "extract_from_table", lambda text, columns, model, request: read.append(text) or fake_rows([]))
+
+    table.run([{"id": "f:0", "text": "t", "prose": "", "pages": [3], "headings": [], "tables": [long]}], COLUMNS)
+
+    assert len(read) == 3
+    header = "Daftar kewajiban\n\n| No | Kewajiban | Tenggat |\n|----|----|----|\n"
+    assert all(batch.startswith(header) for batch in read)
+    assert [batch.count("bayar termin") for batch in read] == [40, 40, 20]
+    assert "| 40 | bayar termin 40 |" in read[1] and "| 39 |" not in read[1]
+
+
+def test_a_value_from_a_table_is_checked_against_the_table_not_the_chunk(monkeypatch):
+    chunks = [{"id": "f:0", "text": "triplet text only", "prose": "", "pages": [3], "headings": [],
+               "tables": [doc_table(2)]}]
+    monkeypatch.setattr(table, "extract_from_table",
+                        lambda text, columns, model, request: fake_rows([["bayar termin 1", "31 Desember 2099"]]))
+
+    [found] = table.run(chunks, COLUMNS)
+
+    assert found["values"] == {"Kewajiban": "bayar termin 1", "Tenggat": ""}
+
+
+def test_the_table_prompt_frames_its_text_as_a_table_with_a_larger_cap(monkeypatch):
+    seen = {}
+
+    class FakeModel:
+        def with_structured_output(self, schema):
+            return self
+
+        def invoke(self, messages):
+            seen["messages"] = messages
+            return fake_rows([])
+
+    def build(model=None, *, temperature=0.0, max_tokens=None):
+        seen["max_tokens"] = max_tokens
+        return FakeModel()
+
+    monkeypatch.setattr(table, "llm", build)
+
+    table.extract_from_table("| a | b |", COLUMNS, None, "kewajiban")
+
+    (_, system), (_, human) = seen["messages"]
+    assert system == table.TABLE_EXTRACT_SYSTEM
+    assert human.endswith("Table:\n| a | b |") and human.startswith("Request:\nkewajiban")
+    assert seen["max_tokens"] == table.TABLE_EXTRACT_MAX_TOKENS
+
+
+def test_a_chunk_ingested_before_tables_were_kept_is_read_from_its_text(monkeypatch, chunks):
+    read = []
+    monkeypatch.setattr(table, "extract_from_table", lambda *a: pytest.fail("no table to read"))
+    monkeypatch.setattr(table, "extract_one", lambda text, columns, model, request: read.append(text) or fake_rows([]))
+
+    # No table_ids on the node: list_chunks returns them as None, and the API resolves that to no tables
+    table.run([{**c, "table_ids": None, "prose": None, "tables": []} for c in chunks], COLUMNS)
+
+    assert read == [c["text"] for c in chunks]

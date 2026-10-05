@@ -67,7 +67,7 @@ def test_ingest_writes_each_chunks_regions_to_neo4j_as_json(monkeypatch):
         {"idx": 1, "text": "b", "pages": [], "headings": [], "regions": []},
     ]
     monkeypatch.setattr(pipeline, "graph", lambda: Graph())
-    monkeypatch.setattr(pipeline, "convert", lambda path, on_progress=None: (None, 10, chunks))
+    monkeypatch.setattr(pipeline, "convert", lambda path, on_progress=None: (None, 10, chunks, []))
     monkeypatch.setattr(pipeline, "embeddings", lambda: type("E", (), {"embed_documents": lambda self, texts: [[0.0]] * len(texts)})())
 
     pipeline.ingest("f", "doc.pdf")
@@ -122,7 +122,7 @@ def test_ingest_records_the_document_language_and_survives_failing_to_detect_it(
 
     chunks = [{"idx": 0, "text": "Pasal 1 Pihak pertama wajib membayar", "pages": [1], "headings": [], "regions": []}]
     monkeypatch.setattr(pipeline, "graph", lambda: Graph())
-    monkeypatch.setattr(pipeline, "convert", lambda path, on_progress=None: (None, 10, chunks))
+    monkeypatch.setattr(pipeline, "convert", lambda path, on_progress=None: (None, 10, chunks, []))
     monkeypatch.setattr(pipeline, "embeddings", lambda: type("E", (), {"embed_documents": lambda self, texts: [[0.0]] * len(texts)})())
 
     for answer, expected in (("Indonesian ", "Indonesian"), (RuntimeError("model down"), None)):

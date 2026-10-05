@@ -21,6 +21,7 @@ GET_FILE = "MATCH (f:File {id: $id}) RETURN f {.*} AS file"
 DELETE_FILE_CASCADE = [
     "MATCH (f:File {id: $id}) DETACH DELETE f",
     "MATCH (n:Chunk {file_id: $id}) DETACH DELETE n",
+    "MATCH (n:DocTable {file_id: $id}) DETACH DELETE n",
     "MATCH (n:Section {file_id: $id}) DETACH DELETE n",
     "MATCH (n:__Entity__ {file_id: $id}) DETACH DELETE n",
     "MATCH (n:Turn {file_id: $id}) DETACH DELETE n",
@@ -44,13 +45,21 @@ ORDER BY c.idx
 
 ALL_CHUNKS = """
 MATCH (c:Chunk {file_id: $file_id})
-RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings, c.regions AS regions
+RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings, c.regions AS regions,
+       c.table_ids AS table_ids, c.prose AS prose
 ORDER BY c.idx
 """
 
 # Same rows as ALL_CHUNKS, but for callers that only need the opening of the document (proposing
 # columns), so a 200-page document is not read in full for a single prompt.
 FIRST_CHUNKS = ALL_CHUNKS + "LIMIT $limit"
+
+DOC_TABLES = """
+MATCH (t:DocTable {file_id: $file_id})
+RETURN t.id AS id, t.idx AS idx, t.caption AS caption, t.markdown AS markdown, t.pages AS pages,
+       t.regions AS regions
+ORDER BY t.idx
+"""
 
 # Columns and rows are JSON-encoded for the same reason citations are: a Neo4j property cannot hold
 # a list of maps.
@@ -198,6 +207,7 @@ def delete_file(file_id: str) -> None:
 # Table Extractions stay: a retry is the same Document, not a new one.
 RESET_INGEST = [
     "MATCH (n:Chunk {file_id: $id}) DETACH DELETE n",
+    "MATCH (n:DocTable {file_id: $id}) DETACH DELETE n",
     "MATCH (n:Section {file_id: $id}) DETACH DELETE n",
     "MATCH (n:__Entity__ {file_id: $id}) DETACH DELETE n",
     "MATCH (f:File {id: $id}) SET f.status = 'queued', f.progress = 0.0, f.error = null, f.step_done = 0, "
@@ -256,6 +266,13 @@ def list_chunks(file_id: str, limit: int | None = None) -> list[dict]:
     # A chunk written before Highlights shipped has no regions property -- Neo4j returns None for it,
     # which means "no Highlight" the same way an empty list does.
     return [{**row, "regions": json.loads(row.get("regions") or "[]")} for row in rows]
+
+
+def list_doc_tables(file_id: str) -> list[dict]:
+    """The tables Docling recognised in the document, whole. None for a document ingested before they
+    were kept, which a Table Extraction then reads from its chunks' text alone."""
+    rows = graph().query(DOC_TABLES, {"file_id": file_id})
+    return [{**row, "regions": json.loads(row["regions"])} for row in rows]
 
 
 def _table_extraction(row: dict) -> dict:

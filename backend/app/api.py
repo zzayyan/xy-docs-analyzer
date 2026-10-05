@@ -339,11 +339,12 @@ def delete_document(doc_id: str) -> None:
 
 @app.post("/documents/{doc_id}/retry", response_model=Document)
 def retry_document(doc_id: str, background: BackgroundTasks) -> dict:
-    """Ingest a failed Document again from its kept Original, so a failure late in a long ingest (or a
-    server restart mid-way) costs a retry, not a re-upload."""
+    """Ingest a Document again from its kept Original, so a failure late in a long ingest (or a server
+    restart mid-way) costs a retry, not a re-upload. A finished Document can be ingested again too, to pick
+    up what a newer ingest keeps (its tables, docs/adr/0005); never one whose ingest is still running."""
     file = get_file(doc_id)
-    if file["status"] != "error":
-        raise HTTPException(status_code=409, detail=f"only a failed document can be retried (status: {file['status']})")
+    if file["status"] not in ("error", "done"):
+        raise HTTPException(status_code=409, detail=f"the document is still being ingested (status: {file['status']})")
     path = original_path(doc_id)
     if path is None:
         raise HTTPException(status_code=409, detail="original not kept for this document, upload it again")
@@ -381,7 +382,12 @@ def extract_table(
         return extraction is None or extraction["status"] == "cancelled"
 
     try:
-        document = store.list_chunks(doc_id)
+        # Each chunk carries the tables it holds, read whole by the run instead of chunk by chunk (docs/adr/0005)
+        tables = {t["id"]: t for t in store.list_doc_tables(doc_id)}
+        document = [
+            {**chunk, "tables": [tables[i] for i in chunk.get("table_ids") or [] if i in tables]}
+            for chunk in store.list_chunks(doc_id)
+        ]
         # Scoped to the parts that answer the request unless the user asked for everything (docs/adr/0004);
         # what was read is kept on the run, so a user can see what it skipped and re-run it on everything
         chunks = document if read_all else table.scope(request, document, model)

@@ -31,6 +31,11 @@ _Avoid_: Passage, block, segment
 A node in a long document's outline, following its heading structure.
 _Avoid_: Chapter, heading, node
 
+**Document Table**:
+A table printed in the document itself, as Docling recognised it, kept whole beside the chunks it
+spans; not the table a Table Extraction produces.
+_Avoid_: Table (alone, ambiguous with a Table Extraction's output)
+
 **Document Language**:
 The language a document is written in, which may differ from the language a question is asked in.
 
