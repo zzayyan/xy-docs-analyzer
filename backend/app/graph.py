@@ -19,6 +19,7 @@ class State(TypedDict, total=False):
     mode: str  # "short" | "long"
     model: str | None  # the document's chosen LLM, or None for settings.llm_model
     history: list[dict]  # prior {question, answer} turns, oldest first
+    language: str | None  # the Document Language, or None when ingest did not record one
     search_queries: list[str]  # the question as 1-3 standalone search queries, for retrieval only
     retrieved: Annotated[list[dict], operator.add]  # parallel retrievers append here
     contexts: list[dict]  # deduplicated, budgeted input for generate
@@ -33,10 +34,23 @@ SYSTEM_PROMPT = (
 
 MAX_SUB_QUERIES = 3
 
+# Which language the queries are written in. Without a Document Language they keep the question's; with
+# one they are written in it, because the keyword search, the outline and the graph's entity names only
+# match words the document itself uses (the embeddings are multilingual, the rest is not).
+QUESTION_LANGUAGE = (
+    "Write every query in the SAME language as the latest question: an English question gives English "
+    "queries, an Indonesian question gives Indonesian queries, whatever language the examples below are in."
+)
+DOCUMENT_LANGUAGE = (
+    "The document is written in {language}. Write every query in {language}, translating the question when "
+    "it is asked in another language, whatever language the examples below are in. Keep names, numbers and "
+    "terms the question quotes exactly as written."
+)
+KEEP_QUESTION_LANGUAGE = "Keep the language of the question. "
+KEEP_DOCUMENT_LANGUAGE = "Keep the meaning of the question. "
+
 CONTEXTUALIZE_SYSTEM_PROMPT = (
-    "You turn the latest question into search queries for a document. Write every query in the SAME "
-    "language as the latest question: an English question gives English queries, an Indonesian "
-    "question gives Indonesian queries, whatever language the examples below are in. Follow these "
+    "You turn the latest question into search queries for a document. {language_rule} Follow these "
     "rules in order.\n"
     "1. Make it standalone, so it makes sense without the earlier conversation: resolve pronouns and "
     "references like \"that\", \"the second one\", or \"the third one\" using the conversation history "
@@ -54,7 +68,7 @@ CONTEXTUALIZE_SYSTEM_PROMPT = (
     "one question per topic.\n"
     f"4. Never more than {MAX_SUB_QUERIES} questions. A question about one thing stays one question, "
     "unchanged if it is already standalone.\n"
-    "5. Keep the language of the question. Never answer it, add facts, or add topics it does not ask "
+    "5. {keep_language}Never answer it, add facts, or add topics it does not ask "
     "about.\n\n"
     "Examples:\n"
     "- History has \"3. Structured content yields big gains\"; \"what about the third one?\" -> "
@@ -75,6 +89,15 @@ CONTEXTUALIZE_SYSTEM_PROMPT = (
     "tenggatnya?\"]\n"
     "- \"Berapa nilai kontrak proyek ini?\" -> [\"Berapa nilai kontrak proyek ini?\"]"
 )
+
+
+def contextualize_prompt(language: str | None) -> str:
+    """The contextualize prompt for a document in this language; for None, the question's own language."""
+    if language:
+        return CONTEXTUALIZE_SYSTEM_PROMPT.format(
+            language_rule=DOCUMENT_LANGUAGE.format(language=language), keep_language=KEEP_DOCUMENT_LANGUAGE,
+        )
+    return CONTEXTUALIZE_SYSTEM_PROMPT.format(language_rule=QUESTION_LANGUAGE, keep_language=KEEP_QUESTION_LANGUAGE)
 
 
 class SearchQueries(BaseModel):
@@ -116,17 +139,23 @@ def contextualize(state: State) -> dict:
     - a follow-up ("what about the second one?") becomes standalone -- retrieval only ever sees the
       query text, so without this it finds nothing relevant however much history generate() gets;
     - a compound question ("compare the value and deadline of project A and project B") becomes one
-      query per thing it asks about, so each half gets its own search instead of one blurred query.
+      query per thing it asks about, so each half gets its own search instead of one blurred query;
+    - a question asked in another language than the Document Language becomes queries in the Document
+      Language, in this same call, so a same-language question costs nothing extra.
 
     Runs on every question, first turn included, since compound questions come first as often as not.
     Any failure falls back to the question as asked: a worse search, never a failed answer."""
     history = recent_history(state)
     transcript = "\n".join(f"Q: {h['question']}\nA: {strip_citations(h['answer'])}" for h in history)
     conversation = f"Conversation so far:\n{transcript}\n\n" if history else ""
+    # Said again right after the question: in the system prompt alone, Qwen3.5-4B kept an Indonesian
+    # question's queries in Indonesian for an English document, following the examples' language instead
+    language = state.get("language")
+    reminder = f"\n\nWrite the queries in {language}." if language else ""
     try:
         found = llm(state.get("model")).with_structured_output(SearchQueries).invoke([
-            ("system", CONTEXTUALIZE_SYSTEM_PROMPT),
-            ("human", f"{conversation}Latest question: {state['question']}"),
+            ("system", contextualize_prompt(language)),
+            ("human", f"{conversation}Latest question: {state['question']}{reminder}"),
         ])
         queries = [q.strip() for q in found.queries if q and q.strip()]
     except Exception:

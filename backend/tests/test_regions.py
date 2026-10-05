@@ -93,3 +93,44 @@ def test_a_document_deleted_mid_ingest_stops_it_without_an_error(monkeypatch):
     pipeline.ingest("f", "doc.pdf")
 
     assert len(written) == 1, "stopped at the first status write, no error status attempted"
+
+
+
+def test_ingest_records_the_document_language_and_survives_failing_to_detect_it(monkeypatch):
+    import app.ingest.pipeline as pipeline
+
+    statuses: list[dict] = []
+
+    class Graph:
+        def query(self, statement: str, params: dict) -> list:
+            if "count(f)" in statement:
+                statuses.append(params["props"])
+                return [{"n": 1}]
+            return []
+
+    class Model:
+        def __init__(self, answer):
+            self.answer = answer
+
+        def with_structured_output(self, schema):
+            return self
+
+        def invoke(self, messages):
+            if isinstance(self.answer, Exception):
+                raise self.answer
+            return pipeline.DocumentLanguage(language=self.answer)
+
+    chunks = [{"idx": 0, "text": "Pasal 1 Pihak pertama wajib membayar", "pages": [1], "headings": [], "regions": []}]
+    monkeypatch.setattr(pipeline, "graph", lambda: Graph())
+    monkeypatch.setattr(pipeline, "convert", lambda path, on_progress=None: (None, 10, chunks))
+    monkeypatch.setattr(pipeline, "embeddings", lambda: type("E", (), {"embed_documents": lambda self, texts: [[0.0]] * len(texts)})())
+
+    for answer, expected in (("Indonesian ", "Indonesian"), (RuntimeError("model down"), None)):
+        statuses.clear()
+        monkeypatch.setattr(pipeline, "llm", lambda model=None, a=answer: Model(a))
+
+        pipeline.ingest("f", "doc.pdf")
+
+        [embedding] = [s for s in statuses if s.get("status") == "embedding"]
+        assert embedding["language"] == expected
+        assert statuses[-1]["status"] == "done", "an undetected language never fails the ingest"

@@ -2,12 +2,14 @@ import json
 import threading
 import uuid
 
+from pydantic import BaseModel, Field
+
 from app.config import settings
 from app.db import graph
 from app.ingest.convert import convert
 from app.ingest.kg import extract_graph
 from app.ingest.tree import build_tree
-from app.models import embeddings
+from app.models import embeddings, llm
 
 # Docling peaks at ~14 GB converting one 25-page batch (see convert_document), so two conversions at
 # once can exhaust memory and kill the worker. Only conversion is serialized; embedding, summaries and
@@ -15,6 +17,32 @@ from app.models import embeddings
 # ponytail: one global lock, so a queued upload waits for the whole conversion ahead of it; a bounded
 # semaphore sized to RAM if several must convert at once.
 CONVERT_LOCK = threading.Lock()
+
+
+# Enough text to tell a language apart, small enough for one cheap call
+LANGUAGE_SAMPLE_CHARS = 2000
+
+LANGUAGE_SYSTEM = (
+    "Name the language the text is written in, as its English name: English, Indonesian, and so on. If it "
+    "mixes languages, name the one most of it is written in."
+)
+
+
+class DocumentLanguage(BaseModel):
+    language: str = Field(description="The language's English name, e.g. English or Indonesian")
+
+
+def detect_language(chunks: list[dict]) -> str | None:
+    """The Document Language, from the opening of its text. None when the call fails or says nothing:
+    a document without one is asked exactly as before, which is better than failing its ingest."""
+    sample = "\n\n".join(c["text"] for c in chunks)[:LANGUAGE_SAMPLE_CHARS]
+    if not sample.strip():
+        return None
+    try:
+        found = llm().with_structured_output(DocumentLanguage).invoke([("system", LANGUAGE_SYSTEM), ("human", sample)])
+    except Exception:
+        return None
+    return found.language.strip() or None
 
 
 class Deleted(Exception):
@@ -62,7 +90,7 @@ def ingest(file_id: str, path: str) -> None:
         mode = "long" if tokens > settings.long_doc_tokens else "short"
         # embedding is one call for every chunk at once, so it has no sub-progress of its own
         step(
-            file_id, tokens=tokens, mode=mode, chunks=len(chunks),
+            file_id, tokens=tokens, mode=mode, chunks=len(chunks), language=detect_language(chunks),
             status="embedding", progress=0.3, step_done=0, step_total=0,
         )
 

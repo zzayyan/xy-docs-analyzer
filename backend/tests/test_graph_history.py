@@ -119,3 +119,30 @@ def test_a_long_document_also_searches_vectors_and_fuses_once(monkeypatch):
     fused = [u["fuse"] for u in updates if "fuse" in u]
     assert len(fused) == 1, "fuse waits for all three retrievers, then runs once"
     assert {c["source"] for c in fused[0]["contexts"]} == {"tree", "vector"}, "vector hits reach the answer"
+
+
+def test_a_question_in_another_language_is_searched_in_the_document_language_in_the_same_call(monkeypatch):
+    seen = []
+    monkeypatch.setattr(graph_module, "llm", lambda model=None: _FakeLLM(queries=["What is the contract value?"], seen=seen))
+
+    result = graph_module.contextualize({"question": "Berapa nilai kontraknya?", "history": [], "language": "English"})
+
+    assert result == {"search_queries": ["What is the contract value?"]}
+    assert len(seen) == 1, "translating is the same call that rewrites, never an extra one"
+    system = seen[0][0][1]
+    assert "The document is written in English. Write every query in English" in system
+    assert "SAME language as the latest question" not in system
+    assert seen[0][1][1].endswith("Write the queries in English."), "said again after the question, for a small model"
+
+
+def test_a_document_with_no_recorded_language_is_asked_exactly_as_before(monkeypatch):
+    seen = []
+    monkeypatch.setattr(graph_module, "llm", lambda model=None: _FakeLLM(queries=["Berapa nilai kontraknya?"], seen=seen))
+
+    for state in ({"question": "Berapa nilai kontraknya?", "history": []},
+                  {"question": "Berapa nilai kontraknya?", "history": [], "language": None}):
+        graph_module.contextualize(state)
+
+    assert [messages[0][1] for messages in seen] == [graph_module.contextualize_prompt(None)] * 2
+    assert "SAME language as the latest question" in seen[0][0][1] and "translating" not in seen[0][0][1]
+    assert all(messages[1][1] == "Latest question: Berapa nilai kontraknya?" for messages in seen)

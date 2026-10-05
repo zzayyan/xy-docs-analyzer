@@ -78,6 +78,22 @@ def test_stream_answer_passes_history_through_to_the_graph(stubbed, monkeypatch)
     assert seen_state["history"] == [{"question": "earlier q", "answer": "earlier a"}]
 
 
+def test_stream_answer_passes_the_document_language_to_the_graph(stubbed, monkeypatch):
+    monkeypatch.setattr(store_module, "get_file", lambda doc_id: {**fake_document(doc_id), "language": "English"})
+    seen_state = {}
+
+    async def fake_stream(state, stream_mode):
+        seen_state.update(state)
+        yield ("updates", {"fuse": {"contexts": []}})
+
+    monkeypatch.setattr(api_module.workflow, "astream", fake_stream)
+
+    with client.stream("GET", "/chat/stream", params={"doc_id": "d1", "question": "Berapa nilainya?"}) as r:
+        r.read()
+
+    assert seen_state["language"] == "English"
+
+
 def test_citations_precede_tokens_leaked_nodes_filtered_newline_survives(stubbed, monkeypatch):
     async def fake_stream(state, stream_mode):
         yield ("updates", {"vector_retrieve": {"retrieved": []}})

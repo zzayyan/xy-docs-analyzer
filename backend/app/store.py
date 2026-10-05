@@ -201,7 +201,7 @@ RESET_INGEST = [
     "MATCH (n:Section {file_id: $id}) DETACH DELETE n",
     "MATCH (n:__Entity__ {file_id: $id}) DETACH DELETE n",
     "MATCH (f:File {id: $id}) SET f.status = 'queued', f.progress = 0.0, f.error = null, f.step_done = 0, "
-    "f.step_total = 0, f.mode = null, f.tokens = null, f.chunks = null, f.graph_skipped = null, "
+    "f.step_total = 0, f.mode = null, f.tokens = null, f.chunks = null, f.graph_skipped = null, f.language = null, "
     "f.updated_at = timestamp()",
 ]
 

@@ -89,6 +89,7 @@ class Document(BaseModel):
     step_done: int | None = None
     step_total: int | None = None
     llm_model: str | None = None
+    language: str | None = None  # the Document Language, detected at ingest
     has_original: bool = False
     # Pages in a PDF Original, for the document viewer; only on GET /documents/{id}, never on the list
     page_count: int | None = None
@@ -603,6 +604,7 @@ def sse(event: str, data: object) -> str:
 
 async def stream_answer(
     doc_id: str, question: str, mode: str, model: str | None = None, history: list[dict] | None = None,
+    language: str | None = None,
 ) -> AsyncIterator[str]:
     # Must be a real async generator over workflow.astream(), not a sync generator over
     # workflow.stream(): a sync generator passed to StreamingResponse gets wrapped in
@@ -619,7 +621,8 @@ async def stream_answer(
     error: str | None = None
     try:
         async for kind, payload in workflow.astream(
-            {"question": question, "doc_id": doc_id, "mode": mode, "model": model, "history": history or []},
+            {"question": question, "doc_id": doc_id, "mode": mode, "model": model, "history": history or [],
+             "language": language},
             stream_mode=["updates", "messages"],
         ):
             if kind == "updates":
@@ -681,7 +684,9 @@ def chat_stream(doc_id: str, question: str, model: str | None = None) -> Streami
     if model is not None and model != file.get("llm_model"):
         set_status(doc_id, llm_model=model)
     return StreamingResponse(
-        stream_answer(doc_id, question, file["mode"], model or file.get("llm_model"), chat_history(doc_id)),
+        stream_answer(
+            doc_id, question, file["mode"], model or file.get("llm_model"), chat_history(doc_id), file.get("language"),
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
