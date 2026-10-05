@@ -478,6 +478,25 @@ def test_scope_reads_only_the_parts_the_model_picks_with_the_whole_outline_in_vi
     assert "1. Landasan hukum -- body 0" in seen[0] and "2. Katalog website" in seen[0] and "3. Kontak" in seen[0]
 
 
+def test_scope_shows_the_captions_of_the_tables_a_part_holds(monkeypatch):
+    seen = []
+    monkeypatch.setattr(table, "read_structured", lambda schema, messages, model, max_tokens: seen.append(messages[1][1]) or table.ScopedParts(parts=[2]))
+    results = {"id": "f:t5", "caption": "Table 6: Absolute impression metrics"}
+    doc = [
+        {"id": "f:0", "text": "Methods\nWe propose nine methods", "headings": ["Methods"], "tables": []},
+        {"id": "f:1", "text": "Methods\n0, Count = 19", "headings": ["Methods"], "tables": [results]},
+        {"id": "f:2", "text": "Methods\n1, Count = 21", "headings": ["Methods"], "tables": [results]},
+        {"id": "f:3", "text": "Results\nWe ran five seeds", "headings": ["Results"], "tables": []},
+    ]
+
+    table.scope("every method in Table 6", doc, None)
+
+    assert "1. Methods -- We propose nine methods [tables: Table 6: Absolute impression metrics]\n" in seen[0]
+    parts = seen[0].split("Parts:\n")[1]
+    assert parts.endswith("2. Results -- We ran five seeds"), "a part without tables shows none"
+    assert parts.count("Table 6") == 1, "a table spanning a part's chunks is listed once"
+
+
 @pytest.mark.parametrize("answer", [table.ScopedParts(parts=[]), table.ScopedParts(parts=[0, 7]), RuntimeError("down")])
 def test_scope_reads_the_whole_document_when_it_gets_no_usable_answer(monkeypatch, answer):
     def reply(*_):

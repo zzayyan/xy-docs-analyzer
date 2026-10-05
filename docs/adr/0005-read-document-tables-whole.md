@@ -28,9 +28,13 @@ A Table Extraction reads each table touched by the chosen chunks once, whole, at
 chunks, in batches of `TABLE_BATCH_ROWS` rows under the repeated header. It reads each chunk's
 `prose` instead of its `text` when the chunk holds a table, so the table's rows are not read a second
 time from its triplets. A row from a table is quote-checked against that table's Markdown and cites
-the table's pages and regions, so its Highlight is the table. Scope and merge are unchanged: a table
-is read when any of its chunks is chosen, and the merge pass folds rows found both in a table and in
-the text around it.
+the table's pages and regions, so its Highlight is the table. A table is read when any of its chunks
+is chosen, and the merge pass folds rows found both in a table and in the text around it.
+
+The scope pass also lists the captions of the tables each part holds. A table can sit under a
+heading that says nothing about it: in `2311.09735v3.pdf`, "Table 6" (results) is under "B.4 GEO
+Methods", and with only headings and openings in view the scope chose "C RESULTS" and the run found
+no rows. With the captions shown, it chose "B.4 GEO Methods" on both of two tries.
 
 Chunk text, embeddings and retrieval for questions are unchanged.
 

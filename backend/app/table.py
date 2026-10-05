@@ -87,7 +87,8 @@ TABLE_EXTRACT_SYSTEM = (
 
 SCOPE_SYSTEM = (
     "You decide which parts of a document a table has to be read from. You get the request for the "
-    "table and the document's parts, numbered, each with its heading and how it begins. Return the "
+    "table and the document's parts, numbered, each with its heading, how it begins and the captions of "
+    "any tables it holds. Return the "
     "numbers of every part that could state an item the request asks for. Leave out parts that only "
     "mention such items in passing, as examples of something else, or in a list that answers a "
     "different question. When the request asks for every item of its kind anywhere in the document, "
@@ -232,7 +233,11 @@ def scope(request: str, chunks: list[dict], model: str | None) -> list[dict]:
         heading = " / ".join(part[0].get("headings") or []) or "(no heading)"
         opening = " ".join(part[0]["text"].split())
         opening = opening.removeprefix(" ".join(heading.split(" / ")).strip()).strip()
-        lines.append(f"{i}. {heading[:CONTEXT_SECTION_CHARS]} -- {opening[:SCOPE_PREVIEW_CHARS]}")
+        # A table can sit under a heading that says nothing about it (a results table placed in a methods
+        # appendix), and its caption is not in the part's opening: shown here, so it can still be chosen
+        captions = dict.fromkeys(t["caption"][:CONTEXT_SECTION_CHARS] for c in part for t in c.get("tables") or [] if t.get("caption"))
+        tables = f" [tables: {'; '.join(captions)}]" if captions else ""
+        lines.append(f"{i}. {heading[:CONTEXT_SECTION_CHARS]} -- {opening[:SCOPE_PREVIEW_CHARS]}{tables}")
     messages = [("system", SCOPE_SYSTEM), ("human", f"Request:\n{request}\n\nParts:\n" + "\n".join(lines))]
     try:
         chosen = read_structured(ScopedParts, messages, model, SCOPE_MAX_TOKENS).parts
