@@ -9,6 +9,10 @@ SCHEMA = [
     "CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE",
     "CREATE CONSTRAINT section_id IF NOT EXISTS FOR (s:Section) REQUIRE s.id IS UNIQUE",
     "CREATE CONSTRAINT turn_id IF NOT EXISTS FOR (t:Turn) REQUIRE t.id IS UNIQUE",
+    # Concurrent first startups could each MERGE their own embedding marker; drop the extras so the
+    # constraint can be created on databases that already have them
+    "MATCH (m:Meta) WITH m.key AS key, collect(m) AS ms WHERE size(ms) > 1 UNWIND tail(ms) AS m DELETE m",
+    "CREATE CONSTRAINT meta_key IF NOT EXISTS FOR (m:Meta) REQUIRE m.key IS UNIQUE",
     # Vector search scores a file's own chunks exactly (app/retrieval/vector.py), so the old global
     # vector index only costs writes; dropped here once for databases that still have it
     "DROP INDEX chunk_embedding IF EXISTS",
@@ -74,7 +78,8 @@ def graph() -> Neo4jGraph:
         password=settings.neo4j_password,
         refresh_schema=False,
     )
-    check_embedding_model(g)
+    # Schema first, so the marker MERGE in check_embedding_model runs under the meta_key constraint
     for statement in SCHEMA:
         g.query(statement)
+    check_embedding_model(g)
     return g
