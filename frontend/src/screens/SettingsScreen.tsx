@@ -2,18 +2,18 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge, Button } from '../design-system';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { api, ApiError, type User, type UserRow } from '../lib/api';
+import { api, ApiError, type ModelSettings, type ModelSettingsView, type ModelTest, type User, type UserRow } from '../lib/api';
 import { formatRelative } from '../lib/format';
 import { useLang } from '../lib/i18n';
 
-type Page = 'account' | 'users';
+type Page = 'account' | 'users' | 'models';
 
-/** #/settings/{page}: a sub-nav on the left, one page on the right. Users is for admins only. */
+/** #/settings/{page}: a sub-nav on the left, one page on the right. Users and Models are for admins only. */
 export function SettingsScreen({ user, page }: { user: User; page: string | undefined }) {
   const { t } = useLang();
-  const pages: Page[] = user.role === 'admin' ? ['account', 'users'] : ['account'];
+  const pages: Page[] = user.role === 'admin' ? ['account', 'users', 'models'] : ['account'];
   const current: Page = pages.includes(page as Page) ? (page as Page) : 'account';
-  const label: Record<Page, string> = { account: t.settingsAccount, users: t.settingsUsers };
+  const label: Record<Page, string> = { account: t.settingsAccount, users: t.settingsUsers, models: t.settingsModels };
 
   return (
     <>
@@ -34,7 +34,9 @@ export function SettingsScreen({ user, page }: { user: User; page: string | unde
           ))}
         </nav>
         <div className="settings-page">
-          {current === 'account' ? <AccountPage user={user} /> : <UsersPage self={user} />}
+          {current === 'account' && <AccountPage user={user} />}
+          {current === 'users' && <UsersPage self={user} />}
+          {current === 'models' && <ModelsPage />}
         </div>
       </div>
     </>
@@ -357,5 +359,252 @@ function ResetPasswordDialog({ user, open, onClose }: { user: UserRow; open: boo
         <input className="field" type="password" autoComplete="new-password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
       </label>
     </FormDialog>
+  );
+}
+
+function ModelsPage() {
+  const { t } = useLang();
+  const settingsQuery = useQuery({ queryKey: ['model-settings'], queryFn: api.modelSettings });
+
+  return (
+    <>
+      <PageHead
+        title={t.settingsModels}
+        hint={settingsQuery.data ? (settingsQuery.data.saved ? t.modelsSourceSaved : t.modelsSourceEnv) : undefined}
+      />
+      {settingsQuery.isError && <p className="settings-error">{t.errorGeneric}</p>}
+      {settingsQuery.isPending && <div className="settings-card skeleton-block" style={{ height: 320 }} />}
+      {/* Keyed on the loaded values, so a save or a reset starts the form over from what the server holds */}
+      {settingsQuery.data && <ModelsForm key={JSON.stringify(settingsQuery.data)} loaded={settingsQuery.data} />}
+    </>
+  );
+}
+
+function ModelsForm({ loaded }: { loaded: ModelSettingsView }) {
+  const { t } = useLang();
+  const queryClient = useQueryClient();
+  // Keys start empty: empty means "keep the stored key", which the placeholder shows masked
+  const [form, setForm] = useState<ModelSettings>({
+    ...loaded,
+    llm_api_key: '',
+    table_llm_api_key: '',
+    llm_reasoning_effort: loaded.llm_reasoning_effort ?? '',
+  });
+  const [ownTableModel, setOwnTableModel] = useState(loaded.table_llm_model !== '');
+  const [confirmReset, setConfirmReset] = useState(false);
+  const set = (changes: Partial<ModelSettings>) => setForm((f) => ({ ...f, ...changes }));
+
+  const done = (view: ModelSettingsView) => {
+    queryClient.setQueryData(['model-settings'], view);
+    // The chat's model picker reads /models
+    queryClient.invalidateQueries({ queryKey: ['models'] });
+  };
+  const save = useMutation({
+    mutationFn: () =>
+      api.saveModelSettings({
+        ...form,
+        llm_api_key: form.llm_api_key || null,
+        table_llm_api_key: form.table_llm_api_key || null,
+        table_llm_model: ownTableModel ? form.table_llm_model : '',
+      }),
+    onSuccess: done,
+  });
+  const reset = useMutation({ mutationFn: api.resetModelSettings, onSuccess: done });
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    save.mutate();
+  };
+
+  const openai = form.llm_provider === 'openai';
+
+  return (
+    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+      <div className="settings-card">
+        <h3>{t.modelsChat}</h3>
+        <p className="settings-muted">{t.modelsChatHint}</p>
+        <div className="segmented" role="radiogroup" aria-label={t.modelsProvider} style={{ alignSelf: 'flex-start' }}>
+          {(['ollama', 'openai'] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              role="radio"
+              aria-checked={form.llm_provider === p}
+              aria-selected={form.llm_provider === p}
+              onClick={() => set({ llm_provider: p })}
+            >
+              {p === 'ollama' ? t.modelsProviderOllama : t.modelsProviderOpenai}
+            </button>
+          ))}
+        </div>
+        <div className="settings-fields">
+          <label className="login-label">
+            {t.modelsBaseUrl}
+            <input
+              className="field"
+              required
+              placeholder={openai ? 'https://api.openai.com/v1' : 'http://localhost:11434'}
+              value={form.llm_base_url}
+              onChange={(e) => set({ llm_base_url: e.target.value })}
+            />
+          </label>
+          <label className="login-label">
+            {t.modelsModel}
+            <input
+              className="field"
+              required
+              placeholder={openai ? 'gpt-4.1-mini' : 'qwen3:14b'}
+              value={form.llm_model}
+              onChange={(e) => set({ llm_model: e.target.value })}
+            />
+          </label>
+          {openai && <KeyField value={form.llm_api_key ?? ''} stored={loaded.llm_api_key} onChange={(v) => set({ llm_api_key: v })} />}
+          {openai && (
+            <label className="login-label">
+              {t.modelsReasoning}
+              <input
+                className="field"
+                placeholder="none / low / medium"
+                value={form.llm_reasoning_effort ?? ''}
+                onChange={(e) => set({ llm_reasoning_effort: e.target.value })}
+              />
+            </label>
+          )}
+        </div>
+        <label className="login-label">
+          {t.modelsChoices}
+          <input
+            className="field"
+            placeholder="model-a, model-b"
+            value={form.llm_model_choices}
+            onChange={(e) => set({ llm_model_choices: e.target.value })}
+          />
+          <span className="settings-muted" style={{ fontWeight: 'var(--fw-regular)' }}>
+            {t.modelsChoicesHint}
+          </span>
+        </label>
+        <TestButton
+          test={{
+            slot: 'chat',
+            provider: form.llm_provider,
+            base_url: form.llm_base_url,
+            api_key: form.llm_api_key || null,
+            model: form.llm_model,
+            reasoning_effort: form.llm_reasoning_effort || null,
+          }}
+        />
+      </div>
+
+      <div className="settings-card">
+        <h3>{t.modelsTable}</h3>
+        <label className="settings-check">
+          <input type="checkbox" checked={ownTableModel} onChange={(e) => setOwnTableModel(e.target.checked)} />
+          {t.modelsTableOwn}
+        </label>
+        <p className="settings-muted">{ownTableModel ? t.modelsTableHint : t.modelsTableOff}</p>
+        {ownTableModel && (
+          <>
+            <div className="settings-fields">
+              <label className="login-label">
+                {t.modelsBaseUrl}
+                <input
+                  className="field"
+                  required
+                  placeholder="https://integrate.api.nvidia.com/v1"
+                  value={form.table_llm_base_url}
+                  onChange={(e) => set({ table_llm_base_url: e.target.value })}
+                />
+              </label>
+              <label className="login-label">
+                {t.modelsModel}
+                <input className="field" required value={form.table_llm_model} onChange={(e) => set({ table_llm_model: e.target.value })} />
+              </label>
+              <KeyField
+                value={form.table_llm_api_key ?? ''}
+                stored={loaded.table_llm_api_key}
+                onChange={(v) => set({ table_llm_api_key: v })}
+              />
+            </div>
+            <TestButton
+              test={{
+                slot: 'table',
+                provider: 'openai',
+                base_url: form.table_llm_base_url,
+                api_key: form.table_llm_api_key || null,
+                model: form.table_llm_model,
+                reasoning_effort: null,
+              }}
+            />
+          </>
+        )}
+      </div>
+
+      <div className="settings-actions">
+        {save.isSuccess && <span className="settings-muted">{t.modelsSaved}</span>}
+        {(save.isError || reset.isError) && (
+          <span className="settings-error" style={{ margin: 0 }}>
+            {errorText(save.error ?? reset.error, t.errorGeneric)}
+          </span>
+        )}
+        {loaded.saved && (
+          <Button variant="ghost" size="sm" onClick={() => setConfirmReset(true)}>
+            {t.modelsReset}
+          </Button>
+        )}
+        <Button type="submit" size="sm" disabled={save.isPending}>
+          {t.modelsSave}
+        </Button>
+      </div>
+      <ConfirmDialog
+        open={confirmReset}
+        title={t.modelsResetTitle}
+        body={t.modelsResetBody}
+        confirmLabel={t.modelsReset}
+        onConfirm={() => {
+          setConfirmReset(false);
+          reset.mutate();
+        }}
+        onCancel={() => setConfirmReset(false)}
+      />
+    </form>
+  );
+}
+
+function KeyField({ value, stored, onChange }: { value: string; stored: string | null; onChange: (value: string) => void }) {
+  const { t } = useLang();
+  return (
+    <label className="login-label">
+      {t.modelsApiKey}
+      <input
+        className="field"
+        type="password"
+        autoComplete="off"
+        placeholder={stored ? t.modelsKeyKeep(stored) : ''}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  );
+}
+
+function TestButton({ test }: { test: ModelTest }) {
+  const { t } = useLang();
+  const run = useMutation({ mutationFn: () => api.testModel(test) });
+  const result = run.data;
+
+  return (
+    <div className="settings-test">
+      <Button variant="secondary" size="sm" disabled={run.isPending || !test.base_url || !test.model} onClick={() => run.mutate()}>
+        {run.isPending ? t.modelsTesting : t.modelsTest}
+      </Button>
+      {result?.ok && (
+        <span className="settings-test-ok">
+          {t.modelsTestOk(result.latency_ms)}
+          {result.reply ? ` · "${result.reply}"` : ''}
+        </span>
+      )}
+      {result && !result.ok && <span className="settings-error">{result.error}</span>}
+      {run.isError && <span className="settings-error">{errorText(run.error, t.errorGeneric)}</span>}
+    </div>
   );
 }

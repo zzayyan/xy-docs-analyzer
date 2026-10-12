@@ -42,6 +42,33 @@ export interface Dict {
   userAddHint: string;
   userResetPasswordTitle: (username: string) => string;
   userResetPasswordHint: string;
+  settingsModels: string;
+  modelsSourceEnv: string;
+  modelsSourceSaved: string;
+  modelsChat: string;
+  modelsChatHint: string;
+  modelsProvider: string;
+  modelsProviderOllama: string;
+  modelsProviderOpenai: string;
+  modelsBaseUrl: string;
+  modelsModel: string;
+  modelsApiKey: string;
+  modelsKeyKeep: (masked: string) => string;
+  modelsReasoning: string;
+  modelsChoices: string;
+  modelsChoicesHint: string;
+  modelsTable: string;
+  modelsTableOwn: string;
+  modelsTableHint: string;
+  modelsTableOff: string;
+  modelsTest: string;
+  modelsTesting: string;
+  modelsTestOk: (ms: number) => string;
+  modelsSave: string;
+  modelsSaved: string;
+  modelsReset: string;
+  modelsResetTitle: string;
+  modelsResetBody: string;
   dropActive: string;
 
   emptyTitle: string;
@@ -229,6 +256,33 @@ const en: Dict = {
   userAddHint: 'Every user sees the same documents. Only admins open Users and model settings.',
   userResetPasswordTitle: (username) => `Reset password for ${username}`,
   userResetPasswordHint: 'At least 8 characters. Every session of this user is signed out.',
+  settingsModels: 'Models',
+  modelsSourceEnv: 'Using the values from backend/.env. Saving here overrides them.',
+  modelsSourceSaved: 'Saved here, overriding backend/.env.',
+  modelsChat: 'Chat model',
+  modelsChatHint: 'Answers questions and does the ingest work: summaries and the knowledge graph.',
+  modelsProvider: 'Provider',
+  modelsProviderOllama: 'Ollama (local)',
+  modelsProviderOpenai: 'OpenAI-compatible',
+  modelsBaseUrl: 'Server URL',
+  modelsModel: 'Model',
+  modelsApiKey: 'API key',
+  modelsKeyKeep: (masked) => `${masked} (leave empty to keep)`,
+  modelsReasoning: 'Reasoning effort (optional)',
+  modelsChoices: 'More models in the chat picker',
+  modelsChoicesHint: 'Comma-separated, served by the same server.',
+  modelsTable: 'Table Extraction model',
+  modelsTableOwn: 'Use a separate model for Table Extraction',
+  modelsTableHint: 'Any OpenAI-compatible server. Every table call goes there.',
+  modelsTableOff: 'Tables use the chat model of each document.',
+  modelsTest: 'Test connection',
+  modelsTesting: 'Testing…',
+  modelsTestOk: (ms) => `Connected in ${ms} ms`,
+  modelsSave: 'Save',
+  modelsSaved: 'Saved. New calls use these models now.',
+  modelsReset: 'Reset to .env',
+  modelsResetTitle: 'Reset to .env?',
+  modelsResetBody: 'The models saved here are dropped and the values in backend/.env are used again.',
   dropActive: 'Drop to upload',
 
   emptyTitle: 'Analyze a document',
@@ -421,6 +475,33 @@ const id: Dict = {
   userAddHint: 'Semua pengguna melihat dokumen yang sama. Hanya admin yang bisa membuka Pengguna dan pengaturan model.',
   userResetPasswordTitle: (username) => `Reset kata sandi ${username}`,
   userResetPasswordHint: 'Minimal 8 karakter. Semua sesi pengguna ini akan dikeluarkan.',
+  settingsModels: 'Model',
+  modelsSourceEnv: 'Memakai nilai dari backend/.env. Menyimpan di sini akan menimpanya.',
+  modelsSourceSaved: 'Disimpan di sini, menimpa backend/.env.',
+  modelsChat: 'Model chat',
+  modelsChatHint: 'Menjawab pertanyaan dan mengerjakan ingest: ringkasan dan knowledge graph.',
+  modelsProvider: 'Provider',
+  modelsProviderOllama: 'Ollama (lokal)',
+  modelsProviderOpenai: 'OpenAI-compatible',
+  modelsBaseUrl: 'URL server',
+  modelsModel: 'Model',
+  modelsApiKey: 'API key',
+  modelsKeyKeep: (masked) => `${masked} (kosongkan untuk tetap)`,
+  modelsReasoning: 'Reasoning effort (opsional)',
+  modelsChoices: 'Model tambahan di pilihan chat',
+  modelsChoicesHint: 'Pisahkan dengan koma, dari server yang sama.',
+  modelsTable: 'Model Table Extraction',
+  modelsTableOwn: 'Pakai model terpisah untuk Table Extraction',
+  modelsTableHint: 'Server OpenAI-compatible apa pun. Semua panggilan tabel diarahkan ke sana.',
+  modelsTableOff: 'Tabel memakai model chat masing-masing dokumen.',
+  modelsTest: 'Tes koneksi',
+  modelsTesting: 'Menguji…',
+  modelsTestOk: (ms) => `Terhubung dalam ${ms} ms`,
+  modelsSave: 'Simpan',
+  modelsSaved: 'Tersimpan. Panggilan baru memakai model ini.',
+  modelsReset: 'Kembalikan ke .env',
+  modelsResetTitle: 'Kembalikan ke .env?',
+  modelsResetBody: 'Model yang disimpan di sini dihapus, lalu nilai di backend/.env dipakai lagi.',
   dropActive: 'Lepas untuk mengunggah',
 
   emptyTitle: 'Analisis dokumen',

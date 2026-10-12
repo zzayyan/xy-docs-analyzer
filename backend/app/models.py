@@ -28,46 +28,61 @@ def llm(model: str | None = None, *, temperature: float = 0.0, max_tokens: int |
     # temperature and max_tokens are set on the client, not bound onto it afterwards: a kwarg bound
     # with .bind() is dropped by with_structured_output(), which silently left an intended output cap
     # with no effect (measured: the capped call still ran to 15968 tokens).
-    return _llm(model or settings.llm_model, temperature, max_tokens)
+    #
+    # A document keeps the model it was last asked with; once Settings no longer offers that model
+    # (another server, say), it falls back to the default instead of failing every call.
+    if model not in settings.available_llm_models():
+        model = settings.llm_model
+    return _llm(model, temperature, max_tokens)
 
 
-@lru_cache
-def _llm(model: str, temperature: float = 0.0, max_tokens: int | None = None) -> BaseChatModel:
-    if settings.llm_provider == "openai":
+def chat_model(
+    provider: str, base_url: str, api_key: str, model: str, *, temperature: float = 0.0,
+    max_tokens: int | None = None, reasoning_effort: str | None = None, key_name: str = "LLM_API_KEY",
+    timeout: float = LLM_TIMEOUT_S,
+) -> BaseChatModel:
+    """A client for any configured endpoint, uncached: Settings' connection test builds one from values
+    that are not saved yet."""
+    if provider == "openai":
         return ChatOpenAI(
             model=model,
-            api_key=_api_key(settings.llm_api_key, "LLM_API_KEY"),
-            base_url=settings.llm_base_url,
+            api_key=_api_key(api_key, key_name),
+            base_url=base_url,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=LLM_TIMEOUT_S,
+            timeout=timeout,
             # Only when configured: Qwen3.5 on vLLM needs "none" or it spends every token on reasoning and
             # leaves content empty, while OpenAI itself rejects the parameter on non-reasoning models
-            **({"reasoning_effort": settings.llm_reasoning_effort} if settings.llm_reasoning_effort else {}),
+            **({"reasoning_effort": reasoning_effort} if reasoning_effort else {}),
         )
     return ChatOllama(
         model=model,
-        base_url=settings.llm_base_url,
+        base_url=base_url,
         temperature=temperature,
         # Ollama's own name for a cap on the output; -1 is its default "no cap"
         num_predict=max_tokens or -1,
         num_ctx=settings.llm_num_ctx,
-        client_kwargs={"timeout": LLM_TIMEOUT_S},
+        client_kwargs={"timeout": timeout},
         # Keeps qwen3 <think> output out of answers and extraction JSON
         reasoning=False,
+    )
+
+
+# Cleared by app/model_settings.py whenever Settings change the endpoint
+@lru_cache
+def _llm(model: str, temperature: float = 0.0, max_tokens: int | None = None) -> BaseChatModel:
+    return chat_model(
+        settings.llm_provider, settings.llm_base_url, settings.llm_api_key, model,
+        temperature=temperature, max_tokens=max_tokens, reasoning_effort=settings.llm_reasoning_effort,
     )
 
 
 @lru_cache
 def table_llm(temperature: float = 0.0, max_tokens: int | None = None) -> BaseChatModel:
     """Table Extraction's own model (TABLE_LLM_* in config), always an OpenAI-compatible endpoint."""
-    return ChatOpenAI(
-        model=settings.table_llm_model,
-        api_key=_api_key(settings.table_llm_api_key, "TABLE_LLM_API_KEY"),
-        base_url=settings.table_llm_base_url,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout=LLM_TIMEOUT_S,
+    return chat_model(
+        "openai", settings.table_llm_base_url, settings.table_llm_api_key, settings.table_llm_model,
+        temperature=temperature, max_tokens=max_tokens, key_name="TABLE_LLM_API_KEY",
     )
 
 

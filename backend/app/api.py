@@ -4,6 +4,7 @@ import mimetypes
 import re
 import shutil
 import tempfile
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -18,11 +19,12 @@ import openpyxl
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from pydantic import BaseModel
 
-from app import auth, store, table
+from app import auth, model_settings, store, table
 from app.config import settings
 from app.graph import MAX_HISTORY_TURNS, to_citations, workflow
 from app.ingest.convert import page_count, render_page
 from app.ingest.pipeline import create_file, ingest, set_status
+from app.models import chat_model
 from app.table import (
     Column, ProposedColumns, Stopped, SuggestedTables, document_context, propose_columns, suggest_tables,
 )
@@ -40,6 +42,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         store.fail_interrupted("interrupted by a server restart")
         auth.ensure_admin()
+        model_settings.load()
     except Exception as exc:
         # Neo4j down at boot: start anyway, the first request reports it the same way as before
         print(f"could not finish startup: {exc}")
@@ -101,6 +104,44 @@ class UserUpdate(BaseModel):
 class PasswordChange(BaseModel):
     current: str
     new: str
+
+
+Provider = Literal["ollama", "openai"]
+
+
+class ModelSettings(BaseModel):
+    """The chat model and Table Extraction's own model. Keys go out masked; coming in, a key left as None
+    keeps the stored one, so the form never has to hold a real key."""
+    llm_provider: Provider
+    llm_base_url: str
+    llm_api_key: str | None = None
+    llm_model: str
+    llm_model_choices: str = ""
+    llm_reasoning_effort: str | None = None
+    table_llm_base_url: str = ""
+    table_llm_api_key: str | None = None
+    table_llm_model: str = ""
+
+
+class ModelSettingsView(ModelSettings):
+    # True once saved from Settings; False while every value still comes from .env
+    saved: bool
+
+
+class ModelTest(BaseModel):
+    slot: Literal["chat", "table"]
+    provider: Provider = "openai"
+    base_url: str
+    api_key: str | None = None
+    model: str
+    reasoning_effort: str | None = None
+
+
+class ModelTestResult(BaseModel):
+    ok: bool
+    latency_ms: int
+    reply: str | None = None
+    error: str | None = None
 
 
 class Limits(BaseModel):
@@ -395,6 +436,77 @@ def upload_document(file: UploadFile, background: BackgroundTasks) -> dict:
     shutil.move(path, original)
     background.add_task(ingest, doc_id, str(original))
     return {"doc_id": doc_id}
+
+
+def model_settings_view() -> dict:
+    values = model_settings.current()
+    for field in model_settings.SECRETS:
+        values[field] = model_settings.masked(values[field])
+    return {**values, "saved": bool(model_settings.saved())}
+
+
+def checked_url(url: str, what: str) -> str:
+    url = url.strip().rstrip("/")
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail=f"{what}: a URL starting with http:// or https://")
+    return url
+
+
+@app.get("/settings/models", response_model=ModelSettingsView, dependencies=[Depends(auth.require_admin)])
+def get_model_settings() -> dict:
+    return model_settings_view()
+
+
+@app.put("/settings/models", response_model=ModelSettingsView, dependencies=[Depends(auth.require_admin)])
+def put_model_settings(body: ModelSettings) -> dict:
+    stored = model_settings.current()
+    values = {k: v.strip() if isinstance(v, str) else v for k, v in body.model_dump().items()}
+    for field in model_settings.SECRETS:
+        # A masked key echoed back is the stored key, never a new one
+        if values[field] is None or values[field].startswith(model_settings.MASK):
+            values[field] = stored[field]
+    values["llm_base_url"] = checked_url(values["llm_base_url"], "chat model")
+    if not values["llm_model"]:
+        raise HTTPException(status_code=400, detail="chat model: a model name is required")
+    if values["llm_provider"] == "openai" and not values["llm_api_key"]:
+        raise HTTPException(status_code=400, detail="chat model: an OpenAI-compatible server needs an API key")
+    if values["table_llm_model"]:
+        values["table_llm_base_url"] = checked_url(values["table_llm_base_url"], "table model")
+        if not values["table_llm_api_key"]:
+            raise HTTPException(status_code=400, detail="table model: an API key is required")
+    model_settings.save(values)
+    return model_settings_view()
+
+
+@app.delete("/settings/models", response_model=ModelSettingsView, dependencies=[Depends(auth.require_admin)])
+def reset_model_settings() -> dict:
+    """Back to the .env values."""
+    model_settings.reset()
+    return model_settings_view()
+
+
+TEST_TIMEOUT_S = 30
+
+
+@app.post("/settings/models/test", response_model=ModelTestResult, dependencies=[Depends(auth.require_admin)])
+def test_model(body: ModelTest) -> dict:
+    """One tiny call with the values in the form, saved or not, so a typo shows before anything breaks."""
+    key = body.api_key
+    if key is None or key.startswith(model_settings.MASK):
+        key = model_settings.current()["llm_api_key" if body.slot == "chat" else "table_llm_api_key"]
+    provider = body.provider if body.slot == "chat" else "openai"
+    started = time.monotonic()
+    try:
+        client = chat_model(
+            provider, checked_url(body.base_url, "URL"), key, body.model.strip(),
+            max_tokens=256, reasoning_effort=body.reasoning_effort or None, timeout=TEST_TIMEOUT_S,
+        )
+        reply = client.invoke("Reply with the single word OK.").text
+        return {"ok": True, "latency_ms": int((time.monotonic() - started) * 1000), "reply": reply.strip()[:200]}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return {"ok": False, "latency_ms": int((time.monotonic() - started) * 1000), "error": str(exc)[:500]}
 
 
 @app.get("/limits", response_model=Limits)

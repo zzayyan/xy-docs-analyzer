@@ -23,6 +23,39 @@ export interface UserRow extends User {
   created_at: number | null;
 }
 
+/** Keys come back masked ("••••a1b2"); sending null keeps the stored key. */
+export interface ModelSettings {
+  llm_provider: 'ollama' | 'openai';
+  llm_base_url: string;
+  llm_api_key: string | null;
+  llm_model: string;
+  llm_model_choices: string;
+  llm_reasoning_effort: string | null;
+  table_llm_base_url: string;
+  table_llm_api_key: string | null;
+  table_llm_model: string;
+}
+
+export interface ModelSettingsView extends ModelSettings {
+  saved: boolean;
+}
+
+export interface ModelTest {
+  slot: 'chat' | 'table';
+  provider: 'ollama' | 'openai';
+  base_url: string;
+  api_key: string | null;
+  model: string;
+  reasoning_effort: string | null;
+}
+
+export interface ModelTestResult {
+  ok: boolean;
+  latency_ms: number;
+  reply: string | null;
+  error: string | null;
+}
+
 export interface Limits {
   max_upload_mb: number;
   max_pages: number;
@@ -234,6 +267,24 @@ export const api = {
     }),
 
   deleteUser: (id: string) => request<void>(`/users/${id}`, { method: 'DELETE' }),
+
+  modelSettings: () => request<ModelSettingsView>('/settings/models'),
+
+  saveModelSettings: (values: ModelSettings) =>
+    request<ModelSettingsView>('/settings/models', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(values),
+    }),
+
+  resetModelSettings: () => request<ModelSettingsView>('/settings/models', { method: 'DELETE' }),
+
+  testModel: (test: ModelTest) =>
+    request<ModelTestResult>('/settings/models/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(test),
+    }),
 
   limits: () => request<Limits>('/limits'),
 

@@ -381,6 +381,31 @@ dialog::backdrop {
 .settings-table tbody tr + tr td {
   border-top: var(--stroke-hairline) solid var(--border-subtle);
 }
+.settings-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-ui-sm);
+  color: var(--text-title);
+  cursor: pointer;
+}
+.settings-test {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: var(--stroke-hairline) solid var(--border-subtle);
+}
+.settings-test-ok {
+  font-size: var(--fs-ui-xs);
+  color: var(--status-success);
+  overflow-wrap: anywhere;
+}
+.settings-test .settings-error {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
 .avatar {
   flex: 0 0 auto;
   width: 28px;
