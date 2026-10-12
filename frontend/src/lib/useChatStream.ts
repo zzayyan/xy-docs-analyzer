@@ -59,7 +59,8 @@ export function useChatStream(docId: string, callbacks: ChatStreamCallbacks = {}
       const params = new URLSearchParams({ doc_id: docId, question });
       if (model) params.set('model', model);
       const url = `${API_URL}/chat/stream?${params}`;
-      const es = new EventSource(url);
+      // withCredentials: the session cookie lives on the API's origin
+      const es = new EventSource(url, { withCredentials: true });
       esRef.current = es;
 
       es.addEventListener('status', (e) => {

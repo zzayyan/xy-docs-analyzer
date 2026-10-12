@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Logo } from '../design-system';
 import { LanguageSwitch } from './LanguageSwitch';
 import { UploadButton } from './UploadButton';
-import { api, isInFlight, type Document } from '../lib/api';
+import { api, isInFlight, type Document, type User } from '../lib/api';
 import { formatRelative } from '../lib/format';
 import { statusLabel } from '../lib/status';
 import { useFileDrop } from '../lib/useFileDrop';
@@ -13,9 +13,11 @@ interface DocumentRailProps {
   onUpload: (file: File) => void;
   uploading: boolean;
   onToggle: () => void;
+  user: User;
+  onLogout: () => void;
 }
 
-export function DocumentRail({ activeId, onUpload, uploading, onToggle }: DocumentRailProps) {
+export function DocumentRail({ activeId, onUpload, uploading, onToggle, user, onLogout }: DocumentRailProps) {
   const { t } = useLang();
   const drop = useFileDrop(onUpload);
 
@@ -103,7 +105,18 @@ export function DocumentRail({ activeId, onUpload, uploading, onToggle }: Docume
                   ? t.uploadLimitsUnavailable
                   : ''}
           </span>
-          <LanguageSwitch />
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <LanguageSwitch />
+            <button
+              className="quiet-button"
+              style={{ padding: 5 }}
+              onClick={onLogout}
+              aria-label={t.logout(user.username)}
+              title={t.logout(user.username)}
+            >
+              <LogoutIcon />
+            </button>
+          </span>
         </div>
       </div>
     </aside>
@@ -115,6 +128,15 @@ function PanelIcon() {
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
       <rect x="2" y="2.5" width="12" height="11" rx="2" />
       <path d="M6 2.5v11" />
+    </svg>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 2.5H3.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1H6" />
+      <path d="M10.5 11 13.5 8l-3-3M13.5 8H6" />
     </svg>
   );
 }

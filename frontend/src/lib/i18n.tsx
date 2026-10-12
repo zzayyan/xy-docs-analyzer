@@ -12,6 +12,12 @@ export interface Dict {
   railCollapse: string;
   railExpand: string;
   railEmpty: string;
+  logout: (username: string) => string;
+
+  loginUsername: string;
+  loginPassword: string;
+  loginSubmit: string;
+  loginWrong: string;
   dropActive: string;
 
   emptyTitle: string;
@@ -169,6 +175,12 @@ const en: Dict = {
   railCollapse: 'Hide sidebar',
   railExpand: 'Show sidebar',
   railEmpty: 'No documents yet. Upload one to start.',
+  logout: (username) => `Sign out (${username})`,
+
+  loginUsername: 'Username',
+  loginPassword: 'Password',
+  loginSubmit: 'Sign in',
+  loginWrong: 'Wrong username or password.',
   dropActive: 'Drop to upload',
 
   emptyTitle: 'Analyze a document',
@@ -331,6 +343,12 @@ const id: Dict = {
   railCollapse: 'Sembunyikan panel',
   railExpand: 'Tampilkan panel',
   railEmpty: 'Belum ada dokumen. Unggah satu untuk mulai.',
+  logout: (username) => `Keluar (${username})`,
+
+  loginUsername: 'Nama pengguna',
+  loginPassword: 'Kata sandi',
+  loginSubmit: 'Masuk',
+  loginWrong: 'Nama pengguna atau kata sandi salah.',
   dropActive: 'Lepas untuk mengunggah',
 
   emptyTitle: 'Analisis dokumen',

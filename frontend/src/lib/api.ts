@@ -13,6 +13,12 @@ export type DocumentStatus =
   | 'done'
   | 'error';
 
+export interface User {
+  id: string;
+  username: string;
+  role: 'admin' | 'user';
+}
+
 export interface Limits {
   max_upload_mb: number;
   max_pages: number;
@@ -170,7 +176,8 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, init);
+  // The session is an HttpOnly cookie on the API's origin, so every call has to send it
+  const res = await fetch(`${API_URL}${path}`, { ...init, credentials: 'include' });
   if (!res.ok) {
     // FastAPI's HTTPException body is {"detail": "..."}; fall back to the raw text
     // for anything that didn't go through that path (e.g. a proxy error page).
@@ -188,6 +195,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  login: (username: string, password: string) =>
+    request<User>('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    }),
+
+  logout: () => request<void>('/auth/logout', { method: 'POST' }),
+
+  me: () => request<User>('/auth/me'),
+
   limits: () => request<Limits>('/limits'),
 
   models: () => request<ModelsInfo>('/models'),

@@ -250,6 +250,19 @@ dialog::backdrop {
   outline: none;
   border-color: var(--border-brand-soft);
 }
+.login-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-ui-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-card-title);
+}
+.login-label .field {
+  padding: 8px 10px;
+  font-size: var(--fs-ui-sm);
+  font-weight: var(--fw-regular);
+}
 
 .chip {
   display: inline-flex;

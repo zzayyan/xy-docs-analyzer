@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     long_doc_tokens: int = 20000
     context_token_budget: int = 8000
 
+    # The first admin, created at startup only while the database has no user at all (app/auth.py)
+    admin_username: str = ""
+    admin_password: str = ""
+    # Set when the API is served over HTTPS, so the browser never sends the session cookie in clear
+    cookie_secure: bool = False
+
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "password123"

@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DocumentRail } from './components/DocumentRail';
 import { EmptyWorkspace } from './components/EmptyWorkspace';
+import { LoginScreen } from './components/LoginScreen';
 import { Toast } from './components/Toast';
 import { DocumentScreen } from './screens/DocumentScreen';
 import { api, ApiError } from './lib/api';
@@ -27,6 +28,13 @@ function App() {
   const docId = route.match(/^\/doc\/(.+)$/)?.[1] ?? null;
   const [toast, setToast] = useState<string | null>(null);
   const [railCollapsed, setRailCollapsed] = useState(initialRailCollapsed);
+  // null: signed out. Set by LoginScreen on success and by main.tsx on any 401.
+  const meQuery = useQuery({
+    queryKey: ['me'],
+    queryFn: () => api.me().catch((e) => (e instanceof ApiError && e.status === 401 ? null : Promise.reject(e))),
+    retry: false,
+    staleTime: Infinity,
+  });
 
   const toggleRail = () => {
     const next = !railCollapsed;
@@ -47,9 +55,28 @@ function App() {
     onError: (error: unknown) => setToast(error instanceof ApiError ? error.detail : t.errorGeneric),
   });
 
+  const logout = useMutation({
+    mutationFn: api.logout,
+    onSuccess: () => {
+      // Nothing cached for one user is shown to the next
+      queryClient.clear();
+      queryClient.setQueryData(['me'], null);
+    },
+  });
+
+  if (meQuery.isPending) return null;
+  if (!meQuery.data) return <LoginScreen />;
+
   return (
     <div className="shell" data-doc={docId !== null} data-rail={railCollapsed ? 'collapsed' : 'open'}>
-      <DocumentRail activeId={docId} onUpload={upload.mutate} uploading={upload.isPending} onToggle={toggleRail} />
+      <DocumentRail
+        activeId={docId}
+        onUpload={upload.mutate}
+        uploading={upload.isPending}
+        onToggle={toggleRail}
+        user={meQuery.data}
+        onLogout={() => logout.mutate()}
+      />
       <main className="workspace">
         {docId ? (
           <DocumentScreen key={docId} docId={docId} />

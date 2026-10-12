@@ -9,14 +9,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 import openpyxl
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from pydantic import BaseModel
 
-from app import store, table
+from app import auth, store, table
 from app.config import settings
 from app.graph import MAX_HISTORY_TURNS, to_citations, workflow
 from app.ingest.convert import page_count, render_page
@@ -37,14 +37,19 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # a stuck Table Extraction would refuse every new one for its document.
     try:
         store.fail_interrupted("interrupted by a server restart")
+        auth.ensure_admin()
     except Exception as exc:
         # Neo4j down at boot: start anyway, the first request reports it the same way as before
-        print(f"could not mark interrupted work: {exc}")
+        print(f"could not finish startup: {exc}")
     yield
 
 
-app = FastAPI(title="Docs Analyzer", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])
+# Every route needs a signed-in user except auth.PUBLIC_PATHS
+app = FastAPI(title="Docs Analyzer", lifespan=lifespan, dependencies=[Depends(auth.require_user)])
+# Credentials on: the session is a cookie, sent cross-origin from the Vite dev server
+app.add_middleware(
+    CORSMiddleware, allow_origins=CORS_ORIGINS, allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+)
 
 
 @app.exception_handler(Exception)
@@ -54,11 +59,25 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     # so its response skips CORS headers regardless of what CORSMiddleware is configured with. A
     # plain 500 (e.g. Neo4j unreachable) would otherwise reach the browser as an opaque CORS
     # failure instead of the real error. Adding the header here directly is the documented
-    # workaround. No auth on this API and no logging setup yet, so the detail is the exception
-    # text itself -- fine for local dev, revisit if this API is ever exposed beyond localhost.
+    # workaround. No logging setup yet, so the detail is the exception text itself -- fine for
+    # local dev, revisit if this API is ever exposed beyond localhost.
     origin = request.headers.get("origin")
-    headers = {"Access-Control-Allow-Origin": origin} if origin in CORS_ORIGINS else {}
+    headers = (
+        {"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true"}
+        if origin in CORS_ORIGINS else {}
+    )
     return JSONResponse(status_code=500, content={"detail": str(exc)}, headers=headers)
+
+
+class Login(BaseModel):
+    username: str
+    password: str
+
+
+class User(BaseModel):
+    id: str
+    username: str
+    role: str
 
 
 class Limits(BaseModel):
@@ -206,6 +225,29 @@ class EntityDetail(BaseModel):
     nodes: list[GraphNode]
     edges: list[GraphEdge]
     citations: list[Citation]
+
+
+@app.post("/auth/login", response_model=User)
+def login(body: Login, response: Response) -> dict:
+    user = auth.authenticate(body.username, body.password)
+    if user is None:
+        raise HTTPException(status_code=401, detail="wrong username or password")
+    response.set_cookie(
+        auth.COOKIE, auth.start_session(user["id"]), max_age=auth.SESSION_DAYS * 86400,
+        httponly=True, samesite="lax", secure=settings.cookie_secure,
+    )
+    return user
+
+
+@app.post("/auth/logout", status_code=204)
+def logout(request: Request, response: Response) -> None:
+    auth.end_session(request.cookies[auth.COOKIE])
+    response.delete_cookie(auth.COOKIE, httponly=True, samesite="lax", secure=settings.cookie_secure)
+
+
+@app.get("/auth/me", response_model=User)
+def me(user: dict = Depends(auth.require_user)) -> dict:
+    return user
 
 
 def get_file(doc_id: str) -> dict:
