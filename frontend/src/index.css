@@ -258,6 +258,72 @@ dialog::backdrop {
   font-weight: var(--fw-semibold);
   color: var(--text-card-title);
 }
+.settings {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.settings-section h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--fs-ui-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-title);
+}
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 320px;
+}
+.settings-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: none;
+}
+.settings-inline input.field {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.settings-list {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  border: var(--stroke-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.settings-list > li {
+  padding: 10px 12px;
+}
+.settings-list > li + li {
+  border-top: var(--stroke-hairline) solid var(--border-subtle);
+}
+.settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-ui-sm);
+}
+.settings-muted {
+  margin: 0;
+  font-size: var(--fs-ui-xs);
+  color: var(--text-muted);
+}
+.settings-error {
+  margin: 6px 0 0;
+  font-size: var(--fs-ui-xs);
+  color: var(--status-danger);
+}
 .login-label .field {
   padding: 8px 10px;
   font-size: var(--fs-ui-sm);

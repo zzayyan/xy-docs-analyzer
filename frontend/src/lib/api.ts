@@ -19,6 +19,10 @@ export interface User {
   role: 'admin' | 'user';
 }
 
+export interface UserRow extends User {
+  created_at: number | null;
+}
+
 export interface Limits {
   max_upload_mb: number;
   max_pages: number;
@@ -205,6 +209,31 @@ export const api = {
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
 
   me: () => request<User>('/auth/me'),
+
+  changePassword: (current: string, next: string) =>
+    request<void>('/auth/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current, new: next }),
+    }),
+
+  listUsers: () => request<UserRow[]>('/users'),
+
+  createUser: (username: string, password: string, role: User['role']) =>
+    request<User>('/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role }),
+    }),
+
+  updateUser: (id: string, changes: { password?: string; role?: User['role'] }) =>
+    request<void>(`/users/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(changes),
+    }),
+
+  deleteUser: (id: string) => request<void>(`/users/${id}`, { method: 'DELETE' }),
 
   limits: () => request<Limits>('/limits'),
 

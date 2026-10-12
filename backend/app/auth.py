@@ -32,6 +32,12 @@ WHERE s.expires_at > timestamp()
 RETURN u {.id, .username, .role} AS user
 """
 DELETE_SESSION = "MATCH (s:Session {id: $id}) DETACH DELETE s"
+LIST_USERS = "MATCH (u:User) RETURN u {.id, .username, .role, .created_at} AS user ORDER BY u.username"
+GET_USER = "MATCH (u:User {id: $id}) RETURN u {.*} AS user"
+DELETE_USER = "MATCH (u:User {id: $id}) OPTIONAL MATCH (u)-[:HAS_SESSION]->(s:Session) DETACH DELETE u, s"
+SET_USER = "MATCH (u:User {id: $id}) SET u += $props"
+# Every session of the user but the one kept (none when $keep is null)
+END_SESSIONS = "MATCH (:User {id: $id})-[:HAS_SESSION]->(s:Session) WHERE s.id <> coalesce($keep, '') DETACH DELETE s"
 DELETE_EXPIRED_SESSIONS = "MATCH (s:Session) WHERE s.expires_at <= timestamp() DETACH DELETE s"
 
 
@@ -59,11 +65,35 @@ def public_user(user: dict) -> dict:
 
 
 def create_user(username: str, password: str, role: str = "user") -> dict:
+    """Raises neo4j's ConstraintError when the username is taken."""
     [row] = graph().query(CREATE_USER, {
         "id": str(uuid.uuid4()), "username": normalize(username),
         "password_hash": hash_password(password), "role": role,
     })
     return public_user(row["user"])
+
+
+def list_users() -> list[dict]:
+    return [row["user"] for row in graph().query(LIST_USERS)]
+
+
+def get_user(user_id: str) -> dict | None:
+    rows = graph().query(GET_USER, {"id": user_id})
+    return rows[0]["user"] if rows else None
+
+
+def delete_user(user_id: str) -> None:
+    graph().query(DELETE_USER, {"id": user_id})
+
+
+def set_role(user_id: str, role: str) -> None:
+    graph().query(SET_USER, {"id": user_id, "props": {"role": role}})
+
+
+def set_password(user_id: str, password: str, keep_token: str | None = None) -> None:
+    """Also signs the user out everywhere but the session kept: whoever knew the old password is out."""
+    graph().query(SET_USER, {"id": user_id, "props": {"password_hash": hash_password(password)}})
+    graph().query(END_SESSIONS, {"id": user_id, "keep": token_id(keep_token) if keep_token else None})
 
 
 def authenticate(username: str, password: str) -> dict | None:

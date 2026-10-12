@@ -91,6 +91,19 @@ def test_users_and_sessions_in_neo4j(monkeypatch):
         assert stored and stored[0]["id"] != token, "only the token's hash is stored"
         auth.end_session(token)
         assert auth.session_user(token) is None
+
+        kept, other = auth.start_session(user["id"]), auth.start_session(user["id"])
+        auth.set_password(user["id"], "baru12345", keep_token=kept)
+        assert auth.authenticate(name, "baru12345") == user
+        assert auth.session_user(kept) == user
+        assert auth.session_user(other) is None, "a new password signs out every other session"
+
+        auth.set_role(user["id"], "admin")
+        assert auth.session_user(kept)["role"] == "admin", "a role change applies to a live session at once"
+        auth.delete_user(user["id"])
+        assert auth.get_user(user["id"]) is None
+        assert auth.session_user(kept) is None
+        assert not graph().query("MATCH (s:Session {user_id: $id}) RETURN s", {"id": user["id"]})
     finally:
         graph().query("MATCH (u:User {username: $name}) OPTIONAL MATCH (u)-[:HAS_SESSION]->(s) DETACH DELETE u, s",
                       {"name": name})

@@ -5,6 +5,7 @@ import { EmptyWorkspace } from './components/EmptyWorkspace';
 import { LoginScreen } from './components/LoginScreen';
 import { Toast } from './components/Toast';
 import { DocumentScreen } from './screens/DocumentScreen';
+import { SettingsScreen } from './screens/SettingsScreen';
 import { api, ApiError } from './lib/api';
 import { useLang } from './lib/i18n';
 import { navigate, useHashRoute } from './lib/useHashRoute';
@@ -26,6 +27,7 @@ function App() {
   const queryClient = useQueryClient();
   const route = useHashRoute();
   const docId = route.match(/^\/doc\/(.+)$/)?.[1] ?? null;
+  const inSettings = route === '/settings';
   const [toast, setToast] = useState<string | null>(null);
   const [railCollapsed, setRailCollapsed] = useState(initialRailCollapsed);
   // null: signed out. Set by LoginScreen on success and by main.tsx on any 401.
@@ -68,7 +70,7 @@ function App() {
   if (!meQuery.data) return <LoginScreen />;
 
   return (
-    <div className="shell" data-doc={docId !== null} data-rail={railCollapsed ? 'collapsed' : 'open'}>
+    <div className="shell" data-doc={docId !== null || inSettings} data-rail={railCollapsed ? 'collapsed' : 'open'}>
       <DocumentRail
         activeId={docId}
         onUpload={upload.mutate}
@@ -78,7 +80,9 @@ function App() {
         onLogout={() => logout.mutate()}
       />
       <main className="workspace">
-        {docId ? (
+        {inSettings ? (
+          <SettingsScreen user={meQuery.data} />
+        ) : docId ? (
           <DocumentScreen key={docId} docId={docId} />
         ) : (
           <EmptyWorkspace onUpload={upload.mutate} uploading={upload.isPending} />

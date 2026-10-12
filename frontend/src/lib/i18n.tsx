@@ -13,11 +13,28 @@ export interface Dict {
   railExpand: string;
   railEmpty: string;
   logout: (username: string) => string;
+  settingsOpen: string;
 
   loginUsername: string;
   loginPassword: string;
   loginSubmit: string;
   loginWrong: string;
+
+  settingsTitle: string;
+  settingsAccount: string;
+  settingsUsers: string;
+  roleAdmin: string;
+  roleUser: string;
+  passwordCurrent: string;
+  passwordNew: string;
+  passwordChange: string;
+  passwordChanged: string;
+  userAdd: string;
+  userRole: string;
+  userYou: string;
+  userResetPassword: string;
+  userDeleteTitle: string;
+  userDeleteBody: (username: string) => string;
   dropActive: string;
 
   emptyTitle: string;
@@ -176,11 +193,28 @@ const en: Dict = {
   railExpand: 'Show sidebar',
   railEmpty: 'No documents yet. Upload one to start.',
   logout: (username) => `Sign out (${username})`,
+  settingsOpen: 'Settings',
 
   loginUsername: 'Username',
   loginPassword: 'Password',
   loginSubmit: 'Sign in',
   loginWrong: 'Wrong username or password.',
+
+  settingsTitle: 'Settings',
+  settingsAccount: 'Your account',
+  settingsUsers: 'Users',
+  roleAdmin: 'Admin',
+  roleUser: 'User',
+  passwordCurrent: 'Current password',
+  passwordNew: 'New password (8+ characters)',
+  passwordChange: 'Change password',
+  passwordChanged: 'Password changed. Other sessions are signed out.',
+  userAdd: 'Add user',
+  userRole: 'Role',
+  userYou: 'you',
+  userResetPassword: 'Reset password',
+  userDeleteTitle: 'Delete this user?',
+  userDeleteBody: (username) => `${username} is signed out and can no longer sign in. Documents stay.`,
   dropActive: 'Drop to upload',
 
   emptyTitle: 'Analyze a document',
@@ -344,11 +378,28 @@ const id: Dict = {
   railExpand: 'Tampilkan panel',
   railEmpty: 'Belum ada dokumen. Unggah satu untuk mulai.',
   logout: (username) => `Keluar (${username})`,
+  settingsOpen: 'Pengaturan',
 
   loginUsername: 'Nama pengguna',
   loginPassword: 'Kata sandi',
   loginSubmit: 'Masuk',
   loginWrong: 'Nama pengguna atau kata sandi salah.',
+
+  settingsTitle: 'Pengaturan',
+  settingsAccount: 'Akun Anda',
+  settingsUsers: 'Pengguna',
+  roleAdmin: 'Admin',
+  roleUser: 'Pengguna',
+  passwordCurrent: 'Kata sandi saat ini',
+  passwordNew: 'Kata sandi baru (min. 8 karakter)',
+  passwordChange: 'Ganti kata sandi',
+  passwordChanged: 'Kata sandi diganti. Sesi lain sudah dikeluarkan.',
+  userAdd: 'Tambah pengguna',
+  userRole: 'Peran',
+  userYou: 'Anda',
+  userResetPassword: 'Reset kata sandi',
+  userDeleteTitle: 'Hapus pengguna ini?',
+  userDeleteBody: (username) => `${username} dikeluarkan dan tidak bisa masuk lagi. Dokumen tetap ada.`,
   dropActive: 'Lepas untuk mengunggah',
 
   emptyTitle: 'Analisis dokumen',

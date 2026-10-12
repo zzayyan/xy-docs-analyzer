@@ -8,10 +8,12 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from neo4j.exceptions import ConstraintError
 import openpyxl
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from pydantic import BaseModel
@@ -78,6 +80,27 @@ class User(BaseModel):
     id: str
     username: str
     role: str
+
+
+class UserRow(User):
+    created_at: int | None = None
+
+
+class NewUser(BaseModel):
+    username: str
+    password: str
+    role: Literal["admin", "user"] = "user"
+
+
+class UserUpdate(BaseModel):
+    """What an admin changes on someone else's account; a field left out stays as it is."""
+    password: str | None = None
+    role: Literal["admin", "user"] | None = None
+
+
+class PasswordChange(BaseModel):
+    current: str
+    new: str
 
 
 class Limits(BaseModel):
@@ -248,6 +271,65 @@ def logout(request: Request, response: Response) -> None:
 @app.get("/auth/me", response_model=User)
 def me(user: dict = Depends(auth.require_user)) -> dict:
     return user
+
+
+MIN_PASSWORD = 8
+USERNAME = re.compile(r"[a-z0-9._-]{1,64}")
+
+
+def checked_password(password: str) -> str:
+    if len(password) < MIN_PASSWORD:
+        raise HTTPException(status_code=400, detail=f"password must be at least {MIN_PASSWORD} characters")
+    return password
+
+
+@app.post("/auth/password", status_code=204)
+def change_password(body: PasswordChange, request: Request, user: dict = Depends(auth.require_user)) -> None:
+    """Your own password: the current one is asked again, so a session left open is not enough to take over."""
+    if auth.authenticate(user["username"], body.current) is None:
+        raise HTTPException(status_code=403, detail="current password is wrong")
+    auth.set_password(user["id"], checked_password(body.new), keep_token=request.cookies[auth.COOKIE])
+
+
+@app.get("/users", response_model=list[UserRow], dependencies=[Depends(auth.require_admin)])
+def list_users() -> list[dict]:
+    return auth.list_users()
+
+
+@app.post("/users", response_model=User, dependencies=[Depends(auth.require_admin)])
+def create_user(body: NewUser) -> dict:
+    username = auth.normalize(body.username)
+    if not USERNAME.fullmatch(username):
+        raise HTTPException(status_code=400, detail="username: up to 64 of a-z, 0-9, dot, dash, underscore")
+    try:
+        return auth.create_user(username, checked_password(body.password), body.role)
+    except ConstraintError:
+        raise HTTPException(status_code=409, detail="username already taken")
+
+
+def other_user(user_id: str, admin: dict) -> dict:
+    """An admin never deletes or demotes their own account, so at least one admin always remains."""
+    if user_id == admin["id"]:
+        raise HTTPException(status_code=409, detail="not on your own account")
+    user = auth.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    return user
+
+
+@app.patch("/users/{user_id}", status_code=204)
+def update_user(user_id: str, body: UserUpdate, admin: dict = Depends(auth.require_admin)) -> None:
+    other_user(user_id, admin)
+    if body.password is not None:
+        auth.set_password(user_id, checked_password(body.password))
+    if body.role is not None:
+        auth.set_role(user_id, body.role)
+
+
+@app.delete("/users/{user_id}", status_code=204)
+def delete_user(user_id: str, admin: dict = Depends(auth.require_admin)) -> None:
+    other_user(user_id, admin)
+    auth.delete_user(user_id)
 
 
 def get_file(doc_id: str) -> dict:
