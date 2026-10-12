@@ -85,5 +85,8 @@ def graph() -> Neo4jGraph:
     # Schema first, so the marker MERGE in check_embedding_model runs under the meta_key constraint
     for statement in SCHEMA:
         g.query(statement)
+    # Then the models saved in Settings, so the check sees the embedding model actually in use
+    from app import model_settings
+    model_settings.load(g)
     check_embedding_model(g)
     return g

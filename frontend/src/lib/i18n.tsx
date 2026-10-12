@@ -69,6 +69,19 @@ export interface Dict {
   modelsReset: string;
   modelsResetTitle: string;
   modelsResetBody: string;
+  embedTitle: string;
+  embedStored: (chunks: number, model: string, dim: number) => string;
+  embedEmpty: string;
+  embedDim: string;
+  embedDims: (dim: number) => string;
+  embedUseDim: (dim: number) => string;
+  embedNeedsReindex: (chunks: number) => string;
+  embedSaveReindex: string;
+  embedConfirmTitle: string;
+  embedConfirmBody: (chunks: number) => string;
+  embedProgress: (done: number, total: number) => string;
+  embedDone: string;
+  embedFailed: (error: string) => string;
   dropActive: string;
 
   emptyTitle: string;
@@ -283,6 +296,21 @@ const en: Dict = {
   modelsReset: 'Reset to .env',
   modelsResetTitle: 'Reset to .env?',
   modelsResetBody: 'The models saved here are dropped and the values in backend/.env are used again.',
+  embedTitle: 'Embedding model',
+  embedStored: (chunks, model, dim) => `${chunks} chunks are embedded with ${model} (${dim} dimensions).`,
+  embedEmpty: 'No document is embedded yet, so any model can be used.',
+  embedDim: 'Dimensions',
+  embedDims: (dim) => `${dim} dimensions`,
+  embedUseDim: (dim) => `Use ${dim}`,
+  embedNeedsReindex: (chunks) =>
+    `Another model: all ${chunks} chunks are embedded again before it is used. Search keeps the current model until that is done. Uploads wait meanwhile.`,
+  embedSaveReindex: 'Switch and re-index',
+  embedConfirmTitle: 'Switch the embedding model?',
+  embedConfirmBody: (chunks) =>
+    `All ${chunks} chunks are embedded again with the new model. No LLM call and no re-ingest; documents stay as they are. If it fails, nothing changes.`,
+  embedProgress: (done, total) => `Re-indexing: ${done} of ${total} documents`,
+  embedDone: 'Re-index finished. Search now uses the new model.',
+  embedFailed: (error) => `Re-index failed, the previous model is still in use: ${error}`,
   dropActive: 'Drop to upload',
 
   emptyTitle: 'Analyze a document',
@@ -502,6 +530,21 @@ const id: Dict = {
   modelsReset: 'Kembalikan ke .env',
   modelsResetTitle: 'Kembalikan ke .env?',
   modelsResetBody: 'Model yang disimpan di sini dihapus, lalu nilai di backend/.env dipakai lagi.',
+  embedTitle: 'Model embedding',
+  embedStored: (chunks, model, dim) => `${chunks} chunk di-embed dengan ${model} (${dim} dimensi).`,
+  embedEmpty: 'Belum ada dokumen yang di-embed, jadi model apa pun bisa dipakai.',
+  embedDim: 'Dimensi',
+  embedDims: (dim) => `${dim} dimensi`,
+  embedUseDim: (dim) => `Pakai ${dim}`,
+  embedNeedsReindex: (chunks) =>
+    `Model lain: semua ${chunks} chunk di-embed ulang sebelum dipakai. Pencarian tetap memakai model sekarang sampai selesai. Upload menunggu selama proses.`,
+  embedSaveReindex: 'Ganti & re-index',
+  embedConfirmTitle: 'Ganti model embedding?',
+  embedConfirmBody: (chunks) =>
+    `Semua ${chunks} chunk di-embed ulang dengan model baru. Tanpa panggilan LLM dan tanpa ingest ulang; dokumen tetap seperti sekarang. Kalau gagal, tidak ada yang berubah.`,
+  embedProgress: (done, total) => `Re-index: ${done} dari ${total} dokumen`,
+  embedDone: 'Re-index selesai. Pencarian sekarang memakai model baru.',
+  embedFailed: (error) => `Re-index gagal, model sebelumnya tetap dipakai: ${error}`,
   dropActive: 'Lepas untuk mengunggah',
 
   emptyTitle: 'Analisis dokumen',

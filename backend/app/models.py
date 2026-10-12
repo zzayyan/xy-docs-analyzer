@@ -86,14 +86,19 @@ def table_llm(temperature: float = 0.0, max_tokens: int | None = None) -> BaseCh
     )
 
 
-@lru_cache
-def embeddings() -> Embeddings:
-    if settings.embed_provider == "openai":
+def embedding_model(provider: str, base_url: str, api_key: str, model: str) -> Embeddings:
+    """Uncached, like chat_model: a re-index and the connection test embed with values not in use yet."""
+    if provider == "openai":
         return OpenAIEmbeddings(
-            model=settings.embed_model,
-            api_key=_api_key(settings.embed_api_key, "EMBED_API_KEY"),
-            base_url=settings.embed_base_url,
+            model=model,
+            api_key=_api_key(api_key, "EMBED_API_KEY"),
+            base_url=base_url,
             # Non-OpenAI models are not in tiktoken, so let the server do the token accounting
             check_embedding_ctx_length=False,
         )
-    return OllamaEmbeddings(model=settings.embed_model, base_url=settings.embed_base_url)
+    return OllamaEmbeddings(model=model, base_url=base_url)
+
+
+@lru_cache
+def embeddings() -> Embeddings:
+    return embedding_model(settings.embed_provider, settings.embed_base_url, settings.embed_api_key, settings.embed_model)

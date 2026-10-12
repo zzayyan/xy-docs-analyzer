@@ -18,18 +18,19 @@ FORM = {
 
 @pytest.fixture
 def stored(monkeypatch):
-    """The Meta node as a dict; settings are put back after each test."""
-    node: dict = {}
+    """The saved chat models' Meta node as a dict; settings are put back after each test."""
+    nodes: dict[str, dict] = {"models": {}, "embedding_endpoint": {}}
+    node = nodes["models"]
 
     class Graph:
         def query(self, statement: str, params: dict | None = None) -> list:
             if statement == model_settings.READ:
-                return [{"m": dict(node) or None}]
+                return [{"m": dict(nodes[params["key"]]) or None}]
             if statement == model_settings.WRITE:
-                node.clear()
-                node.update(params["props"])
+                nodes[params["key"]].clear()
+                nodes[params["key"]].update(params["props"])
             elif statement == model_settings.DELETE:
-                node.clear()
+                nodes[params["key"]].clear()
             return []
 
     monkeypatch.setattr(model_settings, "graph", lambda: Graph())

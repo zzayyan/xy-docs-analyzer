@@ -19,12 +19,12 @@ import openpyxl
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from pydantic import BaseModel
 
-from app import auth, model_settings, store, table
+from app import auth, model_settings, reindex, store, table
 from app.config import settings
 from app.graph import MAX_HISTORY_TURNS, to_citations, workflow
 from app.ingest.convert import page_count, render_page
 from app.ingest.pipeline import create_file, ingest, set_status
-from app.models import chat_model
+from app.models import chat_model, embedding_model
 from app.table import (
     Column, ProposedColumns, Stopped, SuggestedTables, document_context, propose_columns, suggest_tables,
 )
@@ -42,7 +42,6 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         store.fail_interrupted("interrupted by a server restart")
         auth.ensure_admin()
-        model_settings.load()
     except Exception as exc:
         # Neo4j down at boot: start anyway, the first request reports it the same way as before
         print(f"could not finish startup: {exc}")
@@ -128,8 +127,39 @@ class ModelSettingsView(ModelSettings):
     saved: bool
 
 
+class EmbeddingSettings(BaseModel):
+    embed_provider: Provider
+    embed_base_url: str
+    embed_api_key: str | None = None
+    embed_model: str
+    embed_dim: int
+    # Embed every stored chunk again with the new model: required once vectors exist and the model changes
+    reindex: bool = False
+
+
+class Reindex(BaseModel):
+    status: Literal["idle", "running", "done", "error"]
+    done: int
+    total: int
+    error: str | None = None
+
+
+class EmbeddingSettingsView(BaseModel):
+    embed_provider: Provider
+    embed_base_url: str
+    embed_api_key: str
+    embed_model: str
+    embed_dim: int
+    saved: bool
+    # Chunks holding a vector, and the model and size those vectors were made with
+    chunks: int
+    stored_model: str | None
+    stored_dim: int | None
+    reindex: Reindex
+
+
 class ModelTest(BaseModel):
-    slot: Literal["chat", "table"]
+    slot: Literal["chat", "table", "embedding"]
     provider: Provider = "openai"
     base_url: str
     api_key: str | None = None
@@ -141,6 +171,8 @@ class ModelTestResult(BaseModel):
     ok: bool
     latency_ms: int
     reply: str | None = None
+    # The vector size an embedding model returned
+    dim: int | None = None
     error: str | None = None
 
 
@@ -413,6 +445,7 @@ def save_upload(file: UploadFile) -> str:
 
 @app.post("/documents", response_model=Upload)
 def upload_document(file: UploadFile, background: BackgroundTasks) -> dict:
+    no_reindex_running()
     path = save_upload(file)
     # Ingest runs for minutes per hundred pages, so refuse the work up front instead of timing the user out.
     # The page cap only applies to PDFs: page_count only knows how to read PDF page counts.
@@ -442,7 +475,7 @@ def model_settings_view() -> dict:
     values = model_settings.current()
     for field in model_settings.SECRETS:
         values[field] = model_settings.masked(values[field])
-    return {**values, "saved": bool(model_settings.saved())}
+    return {**values, "saved": bool(model_settings.saved("models"))}
 
 
 def checked_url(url: str, what: str) -> str:
@@ -461,7 +494,7 @@ def get_model_settings() -> dict:
 def put_model_settings(body: ModelSettings) -> dict:
     stored = model_settings.current()
     values = {k: v.strip() if isinstance(v, str) else v for k, v in body.model_dump().items()}
-    for field in model_settings.SECRETS:
+    for field in ("llm_api_key", "table_llm_api_key"):
         # A masked key echoed back is the stored key, never a new one
         if values[field] is None or values[field].startswith(model_settings.MASK):
             values[field] = stored[field]
@@ -474,14 +507,14 @@ def put_model_settings(body: ModelSettings) -> dict:
         values["table_llm_base_url"] = checked_url(values["table_llm_base_url"], "table model")
         if not values["table_llm_api_key"]:
             raise HTTPException(status_code=400, detail="table model: an API key is required")
-    model_settings.save(values)
+    model_settings.save("models", values)
     return model_settings_view()
 
 
 @app.delete("/settings/models", response_model=ModelSettingsView, dependencies=[Depends(auth.require_admin)])
 def reset_model_settings() -> dict:
     """Back to the .env values."""
-    model_settings.reset()
+    model_settings.reset("models")
     return model_settings_view()
 
 
@@ -493,10 +526,13 @@ def test_model(body: ModelTest) -> dict:
     """One tiny call with the values in the form, saved or not, so a typo shows before anything breaks."""
     key = body.api_key
     if key is None or key.startswith(model_settings.MASK):
-        key = model_settings.current()["llm_api_key" if body.slot == "chat" else "table_llm_api_key"]
-    provider = body.provider if body.slot == "chat" else "openai"
+        key = model_settings.current()[{"chat": "llm_api_key", "table": "table_llm_api_key", "embedding": "embed_api_key"}[body.slot]]
+    provider = "openai" if body.slot == "table" else body.provider
     started = time.monotonic()
     try:
+        if body.slot == "embedding":
+            vector = embedding_model(provider, checked_url(body.base_url, "URL"), key, body.model.strip()).embed_query("OK")
+            return {"ok": True, "latency_ms": int((time.monotonic() - started) * 1000), "dim": len(vector)}
         client = chat_model(
             provider, checked_url(body.base_url, "URL"), key, body.model.strip(),
             max_tokens=256, reasoning_effort=body.reasoning_effort or None, timeout=TEST_TIMEOUT_S,
@@ -507,6 +543,70 @@ def test_model(body: ModelTest) -> dict:
         raise
     except Exception as exc:
         return {"ok": False, "latency_ms": int((time.monotonic() - started) * 1000), "error": str(exc)[:500]}
+
+
+def embedding_view() -> dict:
+    values = model_settings.current()
+    stored = reindex.marker() or {}
+    return {
+        **{field: values[field] for field in model_settings.GROUPS["embedding_endpoint"]},
+        "embed_api_key": model_settings.masked(values["embed_api_key"]),
+        "saved": bool(model_settings.saved("embedding_endpoint")),
+        "chunks": reindex.embedded_chunks(),
+        "stored_model": stored.get("model"),
+        "stored_dim": stored.get("dim"),
+        "reindex": reindex.STATE,
+    }
+
+
+@app.get("/settings/embedding", response_model=EmbeddingSettingsView, dependencies=[Depends(auth.require_admin)])
+def get_embedding_settings() -> dict:
+    """Also what the page polls while a re-index runs."""
+    return embedding_view()
+
+
+@app.put("/settings/embedding", response_model=EmbeddingSettingsView, dependencies=[Depends(auth.require_admin)])
+def put_embedding_settings(body: EmbeddingSettings, background: BackgroundTasks) -> dict:
+    """Another server for the same model saves at once. Another model saves at once only while no vector
+    is stored; otherwise it needs reindex, which embeds every chunk again before switching (app/reindex.py)."""
+    if reindex.running():
+        raise HTTPException(status_code=409, detail="a re-index is already running")
+    values = {k: v.strip() if isinstance(v, str) else v for k, v in body.model_dump(exclude={"reindex"}).items()}
+    if values["embed_api_key"] is None or values["embed_api_key"].startswith(model_settings.MASK):
+        values["embed_api_key"] = model_settings.current()["embed_api_key"]
+    values["embed_base_url"] = checked_url(values["embed_base_url"], "embedding model")
+    if not values["embed_model"] or values["embed_dim"] <= 0:
+        raise HTTPException(status_code=400, detail="embedding model: a model name and a positive dimension are required")
+    if values["embed_provider"] == "openai" and not values["embed_api_key"]:
+        raise HTTPException(status_code=400, detail="embedding model: an OpenAI-compatible server needs an API key")
+
+    stored = reindex.marker() or {}
+    same_model = stored.get("model") == values["embed_model"] and stored.get("dim") == values["embed_dim"]
+    if same_model or not reindex.embedded_chunks():
+        model_settings.save("embedding_endpoint", values)
+        reindex.set_marker(values)
+        return embedding_view()
+
+    if not body.reindex:
+        raise HTTPException(status_code=409, detail="another embedding model needs a re-index of every stored chunk")
+    if reindex.ingests_in_flight():
+        raise HTTPException(status_code=409, detail="wait for the documents still being ingested, then re-index")
+    try:
+        dim = reindex.probe(values)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"embedding model unreachable: {exc}")
+    if dim != values["embed_dim"]:
+        raise HTTPException(status_code=400, detail=f"{values['embed_model']} returns {dim} dimensions, not {values['embed_dim']}")
+    if not reindex.start(values):
+        raise HTTPException(status_code=409, detail="a re-index is already running")
+    background.add_task(reindex.run, values)
+    return embedding_view()
+
+
+def no_reindex_running() -> None:
+    """New chunks written mid re-index would keep the old model's vectors after the switch."""
+    if reindex.running():
+        raise HTTPException(status_code=409, detail="the embedding model is being switched, try again when it is done")
 
 
 @app.get("/limits", response_model=Limits)
@@ -579,6 +679,7 @@ def retry_document(doc_id: str, background: BackgroundTasks) -> dict:
     restart mid-way) costs a retry, not a re-upload. A finished Document can be ingested again too, to pick
     up what a newer ingest keeps (its tables, docs/adr/0005); never one whose ingest is still running."""
     file = get_file(doc_id)
+    no_reindex_running()
     if file["status"] not in ("error", "done"):
         raise HTTPException(status_code=409, detail=f"the document is still being ingested (status: {file['status']})")
     path = original_path(doc_id)

@@ -406,6 +406,19 @@ dialog::backdrop {
   margin: 0;
   overflow-wrap: anywhere;
 }
+.settings-warn {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-brand-tint);
+  font-size: var(--fs-ui-xs);
+  color: var(--text-title);
+}
+.settings-reindex {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .avatar {
   flex: 0 0 auto;
   width: 28px;

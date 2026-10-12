@@ -1,8 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Badge, Button } from '../design-system';
+import { Badge, Button, ProgressBar } from '../design-system';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { api, ApiError, type ModelSettings, type ModelSettingsView, type ModelTest, type User, type UserRow } from '../lib/api';
+import {
+  api,
+  ApiError,
+  type EmbeddingSettings,
+  type EmbeddingSettingsView,
+  type ModelSettings,
+  type ModelSettingsView,
+  type ModelTest,
+  type User,
+  type UserRow,
+} from '../lib/api';
 import { formatRelative } from '../lib/format';
 import { useLang } from '../lib/i18n';
 
@@ -376,6 +386,7 @@ function ModelsPage() {
       {settingsQuery.isPending && <div className="settings-card skeleton-block" style={{ height: 320 }} />}
       {/* Keyed on the loaded values, so a save or a reset starts the form over from what the server holds */}
       {settingsQuery.data && <ModelsForm key={JSON.stringify(settingsQuery.data)} loaded={settingsQuery.data} />}
+      <EmbeddingCard />
     </>
   );
 }
@@ -587,7 +598,7 @@ function KeyField({ value, stored, onChange }: { value: string; stored: string |
   );
 }
 
-function TestButton({ test }: { test: ModelTest }) {
+function TestButton({ test, onDim }: { test: ModelTest; onDim?: (dim: number) => void }) {
   const { t } = useLang();
   const run = useMutation({ mutationFn: () => api.testModel(test) });
   const result = run.data;
@@ -601,10 +612,149 @@ function TestButton({ test }: { test: ModelTest }) {
         <span className="settings-test-ok">
           {t.modelsTestOk(result.latency_ms)}
           {result.reply ? ` · "${result.reply}"` : ''}
+          {result.dim ? ` · ${t.embedDims(result.dim)}` : ''}
         </span>
+      )}
+      {result?.dim && onDim && (
+        <button type="button" className="quiet-button" onClick={() => onDim(result.dim!)}>
+          {t.embedUseDim(result.dim)}
+        </button>
       )}
       {result && !result.ok && <span className="settings-error">{result.error}</span>}
       {run.isError && <span className="settings-error">{errorText(run.error, t.errorGeneric)}</span>}
     </div>
+  );
+}
+
+function EmbeddingCard() {
+  const { t } = useLang();
+  const embeddingQuery = useQuery({
+    queryKey: ['embedding-settings'],
+    queryFn: api.embeddingSettings,
+    // Polled while a re-index runs, for its progress
+    refetchInterval: (query) => (query.state.data?.reindex.status === 'running' ? 1500 : false),
+  });
+  const data = embeddingQuery.data;
+  if (!data) return embeddingQuery.isError ? <p className="settings-error">{t.errorGeneric}</p> : null;
+  // Keyed on what the server holds apart from progress, so a finished switch starts the form over
+  const { reindex, ...loaded } = data;
+  return <EmbeddingForm key={JSON.stringify(loaded)} loaded={data} reindex={reindex} />;
+}
+
+function EmbeddingForm({ loaded, reindex }: { loaded: EmbeddingSettingsView; reindex: EmbeddingSettingsView['reindex'] }) {
+  const { t } = useLang();
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState<EmbeddingSettings>({ ...loaded, embed_api_key: '' });
+  const [confirm, setConfirm] = useState(false);
+  const set = (changes: Partial<EmbeddingSettings>) => setForm((f) => ({ ...f, ...changes }));
+
+  const changesModel = form.embed_model.trim() !== loaded.stored_model || form.embed_dim !== loaded.stored_dim;
+  const needsReindex = loaded.chunks > 0 && changesModel;
+  const running = reindex.status === 'running';
+
+  const save = useMutation({
+    mutationFn: (withReindex: boolean) =>
+      api.saveEmbeddingSettings({ ...form, embed_api_key: form.embed_api_key || null }, withReindex),
+    onSuccess: (view) => queryClient.setQueryData(['embedding-settings'], view),
+  });
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (needsReindex) setConfirm(true);
+    else save.mutate(false);
+  };
+
+  return (
+    <form onSubmit={submit} className="settings-card">
+      <h3>{t.embedTitle}</h3>
+      <p className="settings-muted">
+        {loaded.chunks > 0 && loaded.stored_model
+          ? t.embedStored(loaded.chunks, loaded.stored_model, loaded.stored_dim ?? 0)
+          : t.embedEmpty}
+      </p>
+      <div className="segmented" role="radiogroup" aria-label={t.modelsProvider} style={{ alignSelf: 'flex-start' }}>
+        {(['ollama', 'openai'] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            role="radio"
+            aria-checked={form.embed_provider === p}
+            aria-selected={form.embed_provider === p}
+            disabled={running}
+            onClick={() => set({ embed_provider: p })}
+          >
+            {p === 'ollama' ? t.modelsProviderOllama : t.modelsProviderOpenai}
+          </button>
+        ))}
+      </div>
+      <fieldset className="settings-fields" disabled={running} style={{ border: 'none', margin: 0, padding: 0, minWidth: 0 }}>
+        <label className="login-label">
+          {t.modelsBaseUrl}
+          <input className="field" required value={form.embed_base_url} onChange={(e) => set({ embed_base_url: e.target.value })} />
+        </label>
+        <label className="login-label">
+          {t.modelsModel}
+          <input className="field" required value={form.embed_model} onChange={(e) => set({ embed_model: e.target.value })} />
+        </label>
+        <label className="login-label">
+          {t.embedDim}
+          <input
+            className="field"
+            type="number"
+            min={1}
+            required
+            value={form.embed_dim}
+            onChange={(e) => set({ embed_dim: Number(e.target.value) })}
+          />
+        </label>
+        {form.embed_provider === 'openai' && (
+          <KeyField value={form.embed_api_key ?? ''} stored={loaded.embed_api_key} onChange={(v) => set({ embed_api_key: v })} />
+        )}
+      </fieldset>
+      {needsReindex && !running && <p className="settings-warn">{t.embedNeedsReindex(loaded.chunks)}</p>}
+
+      {reindex.status !== 'idle' && (
+        <div className="settings-reindex">
+          {running && (
+            <ProgressBar
+              value={reindex.total ? (reindex.done / reindex.total) * 100 : 0}
+              label={t.embedProgress(reindex.done, reindex.total)}
+            />
+          )}
+          {reindex.status === 'done' && <span className="settings-test-ok">{t.embedDone}</span>}
+          {reindex.status === 'error' && <span className="settings-error">{t.embedFailed(reindex.error ?? '')}</span>}
+        </div>
+      )}
+
+      <TestButton
+        test={{
+          slot: 'embedding',
+          provider: form.embed_provider,
+          base_url: form.embed_base_url,
+          api_key: form.embed_api_key || null,
+          model: form.embed_model,
+          reasoning_effort: null,
+        }}
+        onDim={(dim) => set({ embed_dim: dim })}
+      />
+      <div className="settings-actions">
+        {save.isSuccess && !needsReindex && !running && <span className="settings-muted">{t.modelsSaved}</span>}
+        {save.isError && <span className="settings-error" style={{ margin: 0 }}>{errorText(save.error, t.errorGeneric)}</span>}
+        <Button type="submit" size="sm" disabled={save.isPending || running}>
+          {needsReindex ? t.embedSaveReindex : t.modelsSave}
+        </Button>
+      </div>
+      <ConfirmDialog
+        open={confirm}
+        title={t.embedConfirmTitle}
+        body={t.embedConfirmBody(loaded.chunks)}
+        confirmLabel={t.embedSaveReindex}
+        onConfirm={() => {
+          setConfirm(false);
+          save.mutate(true);
+        }}
+        onCancel={() => setConfirm(false)}
+      />
+    </form>
   );
 }

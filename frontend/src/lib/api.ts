@@ -40,8 +40,32 @@ export interface ModelSettingsView extends ModelSettings {
   saved: boolean;
 }
 
+export interface EmbeddingSettings {
+  embed_provider: 'ollama' | 'openai';
+  embed_base_url: string;
+  embed_api_key: string | null;
+  embed_model: string;
+  embed_dim: number;
+}
+
+export interface Reindex {
+  status: 'idle' | 'running' | 'done' | 'error';
+  done: number;
+  total: number;
+  error: string | null;
+}
+
+export interface EmbeddingSettingsView extends EmbeddingSettings {
+  saved: boolean;
+  /** Chunks holding a vector, and what those vectors were made with */
+  chunks: number;
+  stored_model: string | null;
+  stored_dim: number | null;
+  reindex: Reindex;
+}
+
 export interface ModelTest {
-  slot: 'chat' | 'table';
+  slot: 'chat' | 'table' | 'embedding';
   provider: 'ollama' | 'openai';
   base_url: string;
   api_key: string | null;
@@ -53,6 +77,8 @@ export interface ModelTestResult {
   ok: boolean;
   latency_ms: number;
   reply: string | null;
+  /** The vector size an embedding model returned */
+  dim: number | null;
   error: string | null;
 }
 
@@ -278,6 +304,15 @@ export const api = {
     }),
 
   resetModelSettings: () => request<ModelSettingsView>('/settings/models', { method: 'DELETE' }),
+
+  embeddingSettings: () => request<EmbeddingSettingsView>('/settings/embedding'),
+
+  saveEmbeddingSettings: (values: EmbeddingSettings, reindex: boolean) =>
+    request<EmbeddingSettingsView>('/settings/embedding', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...values, reindex }),
+    }),
 
   testModel: (test: ModelTest) =>
     request<ModelTestResult>('/settings/models/test', {
