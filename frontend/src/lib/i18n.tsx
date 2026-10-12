@@ -35,6 +35,13 @@ export interface Dict {
   userResetPassword: string;
   userDeleteTitle: string;
   userDeleteBody: (username: string) => string;
+  passwordHint: string;
+  usersCount: (n: number) => string;
+  userCreated: string;
+  userActions: string;
+  userAddHint: string;
+  userResetPasswordTitle: (username: string) => string;
+  userResetPasswordHint: string;
   dropActive: string;
 
   emptyTitle: string;
@@ -206,7 +213,7 @@ const en: Dict = {
   roleAdmin: 'Admin',
   roleUser: 'User',
   passwordCurrent: 'Current password',
-  passwordNew: 'New password (8+ characters)',
+  passwordNew: 'New password',
   passwordChange: 'Change password',
   passwordChanged: 'Password changed. Other sessions are signed out.',
   userAdd: 'Add user',
@@ -215,6 +222,13 @@ const en: Dict = {
   userResetPassword: 'Reset password',
   userDeleteTitle: 'Delete this user?',
   userDeleteBody: (username) => `${username} is signed out and can no longer sign in. Documents stay.`,
+  passwordHint: 'At least 8 characters. Your other sessions are signed out.',
+  usersCount: (n) => (n === 1 ? '1 user' : `${n} users`),
+  userCreated: 'Added',
+  userActions: 'Actions',
+  userAddHint: 'Every user sees the same documents. Only admins open Users and model settings.',
+  userResetPasswordTitle: (username) => `Reset password for ${username}`,
+  userResetPasswordHint: 'At least 8 characters. Every session of this user is signed out.',
   dropActive: 'Drop to upload',
 
   emptyTitle: 'Analyze a document',
@@ -391,7 +405,7 @@ const id: Dict = {
   roleAdmin: 'Admin',
   roleUser: 'Pengguna',
   passwordCurrent: 'Kata sandi saat ini',
-  passwordNew: 'Kata sandi baru (min. 8 karakter)',
+  passwordNew: 'Kata sandi baru',
   passwordChange: 'Ganti kata sandi',
   passwordChanged: 'Kata sandi diganti. Sesi lain sudah dikeluarkan.',
   userAdd: 'Tambah pengguna',
@@ -400,6 +414,13 @@ const id: Dict = {
   userResetPassword: 'Reset kata sandi',
   userDeleteTitle: 'Hapus pengguna ini?',
   userDeleteBody: (username) => `${username} dikeluarkan dan tidak bisa masuk lagi. Dokumen tetap ada.`,
+  passwordHint: 'Minimal 8 karakter. Sesi Anda yang lain akan dikeluarkan.',
+  usersCount: (n) => `${n} pengguna`,
+  userCreated: 'Ditambahkan',
+  userActions: 'Aksi',
+  userAddHint: 'Semua pengguna melihat dokumen yang sama. Hanya admin yang bisa membuka Pengguna dan pengaturan model.',
+  userResetPasswordTitle: (username) => `Reset kata sandi ${username}`,
+  userResetPasswordHint: 'Minimal 8 karakter. Semua sesi pengguna ini akan dikeluarkan.',
   dropActive: 'Lepas untuk mengunggah',
 
   emptyTitle: 'Analisis dokumen',

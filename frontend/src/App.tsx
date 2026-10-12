@@ -27,7 +27,7 @@ function App() {
   const queryClient = useQueryClient();
   const route = useHashRoute();
   const docId = route.match(/^\/doc\/(.+)$/)?.[1] ?? null;
-  const inSettings = route === '/settings';
+  const settingsPage = route.match(/^\/settings(?:\/(\w+))?$/);
   const [toast, setToast] = useState<string | null>(null);
   const [railCollapsed, setRailCollapsed] = useState(initialRailCollapsed);
   // null: signed out. Set by LoginScreen on success and by main.tsx on any 401.
@@ -70,7 +70,7 @@ function App() {
   if (!meQuery.data) return <LoginScreen />;
 
   return (
-    <div className="shell" data-doc={docId !== null || inSettings} data-rail={railCollapsed ? 'collapsed' : 'open'}>
+    <div className="shell" data-doc={docId !== null || settingsPage !== null} data-rail={railCollapsed ? 'collapsed' : 'open'}>
       <DocumentRail
         activeId={docId}
         onUpload={upload.mutate}
@@ -80,8 +80,8 @@ function App() {
         onLogout={() => logout.mutate()}
       />
       <main className="workspace">
-        {inSettings ? (
-          <SettingsScreen user={meQuery.data} />
+        {settingsPage ? (
+          <SettingsScreen user={meQuery.data} page={settingsPage[1]} />
         ) : docId ? (
           <DocumentScreen key={docId} docId={docId} />
         ) : (
