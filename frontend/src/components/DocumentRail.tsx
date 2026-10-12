@@ -12,9 +12,10 @@ interface DocumentRailProps {
   activeId: string | null;
   onUpload: (file: File) => void;
   uploading: boolean;
+  onToggle: () => void;
 }
 
-export function DocumentRail({ activeId, onUpload, uploading }: DocumentRailProps) {
+export function DocumentRail({ activeId, onUpload, uploading, onToggle }: DocumentRailProps) {
   const { t } = useLang();
   const drop = useFileDrop(onUpload);
 
@@ -28,66 +29,93 @@ export function DocumentRail({ activeId, onUpload, uploading }: DocumentRailProp
 
   return (
     <aside className="rail" data-drop={drop.active} {...drop.handlers}>
-      <div className="pane-header">
-        <Logo variant="mark" height={20} basePath="/design-system/assets/" />
-        <span style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-title)' }}>{t.appName}</span>
+      {/* Shown instead of everything else while the rail is collapsed (CSS, desktop only) */}
+      <div className="rail-strip">
+        <button className="quiet-button rail-toggle" onClick={onToggle} aria-label={t.railExpand} title={t.railExpand}>
+          <PanelIcon />
+        </button>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px 8px' }}>
-        <span style={{ fontSize: 'var(--fs-ui-xs)', fontWeight: 'var(--fw-semibold)', color: 'var(--text-card-title)' }}>
-          {t.railDocuments}
-          {documentsQuery.data && (
-            <span style={{ marginLeft: 6, fontWeight: 'var(--fw-regular)', color: 'var(--text-muted)' }}>{documents.length}</span>
+      <div className="rail-body">
+        <div className="pane-header">
+          <Logo variant="mark" height={20} basePath="/design-system/assets/" />
+          <span style={{ fontWeight: 'var(--fw-semibold)', color: 'var(--text-title)' }}>{t.appName}</span>
+          <button
+            className="quiet-button rail-toggle"
+            style={{ marginLeft: 'auto' }}
+            onClick={onToggle}
+            aria-label={t.railCollapse}
+            title={t.railCollapse}
+          >
+            <PanelIcon />
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px 8px' }}>
+          <span style={{ fontSize: 'var(--fs-ui-xs)', fontWeight: 'var(--fw-semibold)', color: 'var(--text-card-title)' }}>
+            {t.railDocuments}
+            {documentsQuery.data && (
+              <span style={{ marginLeft: 6, fontWeight: 'var(--fw-regular)', color: 'var(--text-muted)' }}>{documents.length}</span>
+            )}
+          </span>
+          <UploadButton onFile={onUpload} uploading={uploading} variant="secondary" />
+        </div>
+
+        <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, paddingBottom: 12 }}>
+          {documentsQuery.isPending &&
+            [64, 48, 72, 56].map((w) => (
+              <div key={w} style={{ padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div className="skeleton-block" style={{ height: 12, width: `${w}%` }} />
+                <div className="skeleton-block" style={{ height: 10, width: '36%' }} />
+              </div>
+            ))}
+
+          {documentsQuery.isError && (
+            <p style={{ margin: 0, padding: '8px 20px', fontSize: 'var(--fs-ui-xs)', color: 'var(--status-danger)' }}>{t.errorGeneric}</p>
           )}
-        </span>
-        <UploadButton onFile={onUpload} uploading={uploading} variant="secondary" />
-      </div>
 
-      <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, paddingBottom: 12 }}>
-        {documentsQuery.isPending &&
-          [64, 48, 72, 56].map((w) => (
-            <div key={w} style={{ padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div className="skeleton-block" style={{ height: 12, width: `${w}%` }} />
-              <div className="skeleton-block" style={{ height: 10, width: '36%' }} />
-            </div>
+          {documentsQuery.isSuccess && documents.length === 0 && (
+            <p style={{ margin: 0, padding: '8px 20px', fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>{t.railEmpty}</p>
+          )}
+
+          {documents.map((doc) => (
+            <RailItem key={doc.id} doc={doc} active={doc.id === activeId} />
           ))}
+        </nav>
 
-        {documentsQuery.isError && (
-          <p style={{ margin: 0, padding: '8px 20px', fontSize: 'var(--fs-ui-xs)', color: 'var(--status-danger)' }}>{t.errorGeneric}</p>
-        )}
-
-        {documentsQuery.isSuccess && documents.length === 0 && (
-          <p style={{ margin: 0, padding: '8px 20px', fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>{t.railEmpty}</p>
-        )}
-
-        {documents.map((doc) => (
-          <RailItem key={doc.id} doc={doc} active={doc.id === activeId} />
-        ))}
-      </nav>
-
-      <div
-        style={{
-          flex: '0 0 auto',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 'var(--space-3)',
-          padding: '10px 20px',
-          borderTop: 'var(--stroke-hairline) solid var(--border-subtle)',
-        }}
-      >
-        <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--text-muted)' }}>
-          {drop.active
-            ? t.dropActive
-            : limitsQuery.data
-              ? t.uploadLimitsShort(limitsQuery.data.max_upload_mb, limitsQuery.data.max_pages)
-              : limitsQuery.isError
-                ? t.uploadLimitsUnavailable
-                : ''}
-        </span>
-        <LanguageSwitch />
+        <div
+          style={{
+            flex: '0 0 auto',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 'var(--space-3)',
+            padding: '10px 20px',
+            borderTop: 'var(--stroke-hairline) solid var(--border-subtle)',
+          }}
+        >
+          <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--text-muted)' }}>
+            {drop.active
+              ? t.dropActive
+              : limitsQuery.data
+                ? t.uploadLimitsShort(limitsQuery.data.max_upload_mb, limitsQuery.data.max_pages)
+                : limitsQuery.isError
+                  ? t.uploadLimitsUnavailable
+                  : ''}
+          </span>
+          <LanguageSwitch />
+        </div>
       </div>
     </aside>
+  );
+}
+
+function PanelIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <rect x="2" y="2.5" width="12" height="11" rx="2" />
+      <path d="M6 2.5v11" />
+    </svg>
   );
 }
 

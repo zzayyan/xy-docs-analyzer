@@ -9,6 +9,8 @@ export interface Dict {
   langIndonesian: string;
 
   railDocuments: string;
+  railCollapse: string;
+  railExpand: string;
   railEmpty: string;
   dropActive: string;
 
@@ -164,6 +166,8 @@ const en: Dict = {
   langIndonesian: 'ID',
 
   railDocuments: 'Documents',
+  railCollapse: 'Hide sidebar',
+  railExpand: 'Show sidebar',
   railEmpty: 'No documents yet. Upload one to start.',
   dropActive: 'Drop to upload',
 
@@ -324,6 +328,8 @@ const id: Dict = {
   langIndonesian: 'ID',
 
   railDocuments: 'Dokumen',
+  railCollapse: 'Sembunyikan panel',
+  railExpand: 'Tampilkan panel',
   railEmpty: 'Belum ada dokumen. Unggah satu untuk mulai.',
   dropActive: 'Lepas untuk mengunggah',
 
