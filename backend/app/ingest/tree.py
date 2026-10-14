@@ -8,6 +8,7 @@ from docling_core.types.doc.document import DoclingDocument, SectionHeaderItem, 
 from app.config import settings
 from app.db import graph
 from app.models import llm
+from app.prompts import ingest as prompts
 
 FALLBACK_GROUP_CHUNKS = 8
 SUMMARY_MAX_CHARS = 12000
@@ -18,12 +19,6 @@ NUMBER = re.compile(
     r"^(?:(?:step|langkah|tahap|bab|bagian|chapter|section)\s+)?(\d+(?:\.\d+)*)[.):]?\s+",
     re.IGNORECASE,
 )
-
-SUMMARY_PROMPT = (
-    "Summarize this document section in 1-2 sentences, in the section's language. "
-    "Mention key entities, numbers, and what a reader could look up here."
-)
-
 
 def headings_from_doc(doc: DoclingDocument) -> list[tuple[int, str]]:
     return [
@@ -127,7 +122,7 @@ def summarize_sections(
         if section["id"] not in texts:
             return "Contains: " + "; ".join(child_titles.get(section["id"], []))
         text = "\n\n".join(texts[section["id"]])[:SUMMARY_MAX_CHARS]
-        messages = [("system", SUMMARY_PROMPT), ("human", f"Section: {section['title']}\n\n{text}")]
+        messages = [("system", prompts.SECTION_SUMMARY), ("human", f"Section: {section['title']}\n\n{text}")]
         for _ in range(SUMMARY_ATTEMPTS):
             try:
                 return llm().invoke(messages).content.strip()

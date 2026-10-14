@@ -10,6 +10,7 @@ from app.ingest.convert import convert
 from app.ingest.kg import extract_graph
 from app.ingest.tree import build_tree
 from app.models import embeddings, llm
+from app.prompts import ingest as prompts
 
 # Docling peaks at ~14 GB per batch, so two conversions at once can kill the worker. Only conversion is
 # serialized; the LLM and embedding stages overlap freely.
@@ -18,11 +19,6 @@ CONVERT_LOCK = threading.Lock()
 
 
 LANGUAGE_SAMPLE_CHARS = 2000
-
-LANGUAGE_SYSTEM = (
-    "Name the language the text is written in, as its English name: English, Indonesian, and so on. If it "
-    "mixes languages, name the one most of it is written in."
-)
 
 
 class DocumentLanguage(BaseModel):
@@ -35,7 +31,7 @@ def detect_language(chunks: list[dict]) -> str | None:
     if not sample.strip():
         return None
     try:
-        found = llm().with_structured_output(DocumentLanguage).invoke([("system", LANGUAGE_SYSTEM), ("human", sample)])
+        found = llm().with_structured_output(DocumentLanguage).invoke([("system", prompts.DETECT_LANGUAGE), ("human", sample)])
     except Exception:
         return None
     return found.language.strip() or None

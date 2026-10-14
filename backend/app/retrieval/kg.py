@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 
 from app.db import graph
 from app.models import llm
+from app.prompts import retrieval as prompts
 from app.retrieval.vector import LUCENE_SPECIAL
 
 MATCHES_PER_NAME = 2
@@ -37,11 +38,6 @@ ORDER BY hits DESC, c.idx
 LIMIT $k
 """
 
-SYSTEM_PROMPT = (
-    "List the named things in the question: people, organizations, places, products, regulations, events, "
-    "or key concepts. Copy each name as written. Return an empty list if there are none."
-)
-
 
 class QuestionEntities(BaseModel):
     names: list[str] = Field(description="Entity names mentioned in the question")
@@ -51,7 +47,7 @@ def search(
     file_id: str, question: str, k: int = 6, triple_limit: int = 30, model: str | None = None
 ) -> tuple[list[str], list[dict]]:
     """(graph facts as text lines, chunks mentioning the matched entities)."""
-    extracted = llm(model).with_structured_output(QuestionEntities).invoke([("system", SYSTEM_PROMPT), ("human", question)])
+    extracted = llm(model).with_structured_output(QuestionEntities).invoke([("system", prompts.KG_ENTITIES), ("human", question)])
     # Lowercased so an uppercase AND/OR/NOT inside a name is a word, not a Lucene operator
     names = [name for name in (LUCENE_SPECIAL.sub(" ", n).strip().lower() for n in extracted.names) if name]
     if not names:

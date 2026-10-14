@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.models import llm, table_llm
+from app.prompts import table as prompts
 
 # Caps a runaway repeat loop at seconds instead of minutes (measured: 7s against 110s)
 EXTRACT_MAX_TOKENS = 3000
@@ -28,61 +29,6 @@ CONTEXT_SECTIONS = 40
 CONTEXT_SECTION_CHARS = 80
 CONTEXT_CHUNKS = 5
 CONTEXT_CHUNK_CHARS = 600
-
-PROPOSE_SYSTEM = (
-    "You design the columns of a table from a plain-language request. Propose between two and six "
-    "columns, each with a short name and a one-sentence description of what belongs in it. Name and "
-    "describe the columns in the same language as the request. Where the document quoted below "
-    "already has a word for something, use that word. Do not invent columns the request does not ask "
-    "for."
-)
-
-SUGGEST_SYSTEM = (
-    "You propose tables worth pulling out of a document, from an outline and a few passages of it. "
-    "Give three tables: things the document lists over and over -- obligations, parties, dates, "
-    "amounts, articles -- not a summary of it. Each table has a short title, one plain sentence "
-    "asking for what it collects, and between two and six columns, each column with a short name and "
-    "a one-sentence description. Write all of it in the language of the document."
-)
-
-EXTRACT_SYSTEM = (
-    "You extract table rows from one passage of a document, for a request. Return one row per item in "
-    "the passage that the request asks for, and no rows at all if the passage has none. Something that "
-    "only looks like such an item -- a heading, a menu entry, an example of something else -- is not "
-    "one. Give one value per column, in the order the columns are listed. Quote each value exactly as "
-    "the passage writes it, in the language of the passage -- do not translate, summarise or infer. "
-    "Leave a value empty when the passage does not state it; never fill it with a guess or with words "
-    "like \"not stated\"."
-)
-
-TABLE_EXTRACT_SYSTEM = (
-    "You extract table rows from one table of a document, given in Markdown, for a request. It may be only "
-    "some of the table's rows, under its header. Map every row of the table that the request asks for to "
-    "the requested columns -- one row out per matching table row -- and return no rows at all if none "
-    "matches. When the request names one table, by its number or caption, and this is a different table, "
-    "return no rows. A header or a total is not an item. Give one value per column, in the order the columns are "
-    "listed. Quote each value exactly as the table writes it, in the language of the table -- do not "
-    "translate, summarise or infer. Leave a value empty when the table does not state it; never fill it "
-    "with a guess or with words like \"not stated\"."
-)
-
-SCOPE_SYSTEM = (
-    "You decide which parts of a document a table has to be read from. You get the request for the "
-    "table and the document's parts, numbered, each with its heading, how it begins and the captions of "
-    "any tables it holds. Return the "
-    "numbers of every part that could state an item the request asks for. Leave out parts that only "
-    "mention such items in passing, as examples of something else, or in a list that answers a "
-    "different question. When the request asks for every item of its kind anywhere in the document, "
-    "or you cannot tell, return every part."
-)
-
-MERGE_SYSTEM = (
-    "You are given the numbered rows of one table, each pulled out of a different passage of the same "
-    "document. Find the rows that describe the same item -- the same obligation, party, date or "
-    "amount, mentioned in more than one place -- and return them as groups of row numbers. Only group "
-    "rows that are truly one item: two similar but separate items stay apart. Leave out every row "
-    "that has no duplicate."
-)
 
 
 class Stopped(Exception):
@@ -147,7 +93,7 @@ def chat(model: str | None, **options):
 def propose_columns(request: str, model: str | None = None, context: str = "") -> list[dict]:
     described = f"{context}\n\nRequest:\n{request}" if context else request
     proposed = chat(model).with_structured_output(ProposedColumns).invoke([
-        ("system", PROPOSE_SYSTEM),
+        ("system", prompts.PROPOSE),
         ("human", described),
     ])
     return [column.model_dump() for column in proposed.columns]
@@ -155,7 +101,7 @@ def propose_columns(request: str, model: str | None = None, context: str = "") -
 
 def suggest_tables(context: str, model: str | None = None) -> list[dict]:
     suggested = chat(model).with_structured_output(SuggestedTables).invoke([
-        ("system", SUGGEST_SYSTEM),
+        ("system", prompts.SUGGEST),
         ("human", context),
     ])
     return [suggestion.model_dump() for suggestion in suggested.tables]
@@ -201,7 +147,7 @@ def scope(request: str, chunks: list[dict], model: str | None) -> list[dict]:
         captions = dict.fromkeys(t["caption"][:CONTEXT_SECTION_CHARS] for c in part for t in c.get("tables") or [] if t.get("caption"))
         tables = f" [tables: {'; '.join(captions)}]" if captions else ""
         lines.append(f"{i}. {heading[:CONTEXT_SECTION_CHARS]} -- {opening[:SCOPE_PREVIEW_CHARS]}{tables}")
-    messages = [("system", SCOPE_SYSTEM), ("human", f"Request:\n{request}\n\nParts:\n" + "\n".join(lines))]
+    messages = [("system", prompts.SCOPE), ("human", f"Request:\n{request}\n\nParts:\n" + "\n".join(lines))]
     try:
         chosen = read_structured(ScopedParts, messages, model, SCOPE_MAX_TOKENS).parts
     except Exception:
@@ -216,14 +162,14 @@ def extract_one(text: str, columns: list[dict], model: str | None, request: str)
     # The request goes in too: columns alone made every list that fits them come back as rows
     listed = "\n".join(f"{i}. {c['name']}: {c['description']}" for i, c in enumerate(columns, start=1))
     asked = f"Request:\n{request}\n\n" if request else ""
-    messages = [("system", EXTRACT_SYSTEM), ("human", f"{asked}Columns:\n{listed}\n\nPassage:\n{text}")]
+    messages = [("system", prompts.EXTRACT), ("human", f"{asked}Columns:\n{listed}\n\nPassage:\n{text}")]
     return read_structured(ChunkRows, messages, model, EXTRACT_MAX_TOKENS)
 
 
 def extract_from_table(text: str, columns: list[dict], model: str | None, request: str) -> ChunkRows:
     listed = "\n".join(f"{i}. {c['name']}: {c['description']}" for i, c in enumerate(columns, start=1))
     asked = f"Request:\n{request}\n\n" if request else ""
-    messages = [("system", TABLE_EXTRACT_SYSTEM), ("human", f"{asked}Columns:\n{listed}\n\nTable:\n{text}")]
+    messages = [("system", prompts.EXTRACT_TABLE), ("human", f"{asked}Columns:\n{listed}\n\nTable:\n{text}")]
     return read_structured(ChunkRows, messages, model, TABLE_EXTRACT_MAX_TOKENS)
 
 
@@ -273,7 +219,7 @@ def find_duplicates(rows: list[dict], columns: list[dict], model: str | None) ->
         f"{i}. " + " | ".join(f"{c['name']}: {row['values'].get(c['name'], '')}" for c in columns)
         for i, row in enumerate(rows)
     )
-    found = read_structured(DuplicateGroups, [("system", MERGE_SYSTEM), ("human", listed)], model, MERGE_MAX_TOKENS)
+    found = read_structured(DuplicateGroups, [("system", prompts.MERGE), ("human", listed)], model, MERGE_MAX_TOKENS)
     return found.groups
 
 

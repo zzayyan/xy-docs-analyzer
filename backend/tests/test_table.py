@@ -6,6 +6,7 @@ import pytest
 
 import app.table as table
 from app.config import settings
+from app.prompts import table as prompts
 
 # Kept before the autouse fixture below replaces it, for the one test that is about the call itself
 real_find_duplicates = table.find_duplicates
@@ -587,7 +588,7 @@ def test_the_table_prompt_frames_its_text_as_a_table_with_a_larger_cap(monkeypat
     table.extract_from_table("| a | b |", COLUMNS, None, "kewajiban")
 
     (_, system), (_, human) = seen["messages"]
-    assert system == table.TABLE_EXTRACT_SYSTEM
+    assert system == prompts.EXTRACT_TABLE
     assert human.endswith("Table:\n| a | b |") and human.startswith("Request:\nkewajiban")
     assert seen["max_tokens"] == table.TABLE_EXTRACT_MAX_TOKENS
 

@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 
 from app.db import graph
 from app.models import llm
+from app.prompts import retrieval as prompts
 
 MAX_SECTIONS = 3
 
@@ -21,13 +22,6 @@ RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings, c.r
 ORDER BY rank, c.idx
 LIMIT $limit
 """
-
-SYSTEM_PROMPT = (
-    "You navigate a document outline to find where questions are answered. "
-    f"Return up to {MAX_SECTIONS} section ids (the value in square brackets) for each question, most "
-    "relevant first. "
-    "Prefer the most specific section; choose a parent only when the answer spans its children."
-)
 
 
 class SectionChoice(BaseModel):
@@ -50,7 +44,7 @@ def search(file_id: str, question: str, limit: int = 12, model: str | None = Non
     # ponytail: whole outline in one prompt; for huge trees show levels <= 2 first, then drill down
     outline = "\n".join(outline_line(s) for s in sections)
     choice = llm(model).with_structured_output(SectionChoice).invoke([
-        ("system", SYSTEM_PROMPT),
+        ("system", prompts.TREE_SELECT.format(max_sections=MAX_SECTIONS)),
         ("human", f"Outline:\n{outline}\n\nQuestions:\n" + "\n".join(f"- {q}" for q in questions)),
     ])
 
