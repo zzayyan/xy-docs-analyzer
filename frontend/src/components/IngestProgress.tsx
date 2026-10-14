@@ -14,11 +14,7 @@ const STEP_UNIT: Partial<Record<Document['status'], 'unitPages' | 'unitChunks' |
 export function IngestProgress({ doc }: { doc: Document }) {
   const { t } = useLang();
 
-  // ponytail: Date.now() sampled directly in render is an impure call (oxlint flags it); the
-  // honest fix is an interval-driven clock in state, skipped because this screen already
-  // re-renders every 2s from IngestProgress's own polling query, so the display is never more
-  // than one poll tick stale regardless. Upgrade to a ticking clock if this needs to look live
-  // between polls.
+  // ponytail: impure Date.now() in render; fine since polling re-renders every 2s, use a ticking clock if it must look live
   const startedAt = doc.created_at;
   const elapsedMs = startedAt ? Date.now() - startedAt : null;
   const remainingMs = elapsedMs !== null ? estimateRemaining(elapsedMs, doc.progress) : undefined;

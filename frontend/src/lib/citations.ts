@@ -1,13 +1,11 @@
 import type { Region } from './api';
 
-/** Every form a model writes a citation marker in: "[3]", "[4, 5]", "[4,5,6]", "[4; 5]", "[4-6]". Matching
- * only "[n]" left grouped markers as plain text, unclickable and invisible to "follow sources". */
+/** "[3]", "[4, 5]", "[4,5,6]", "[4; 5]", "[4-6]" */
 export const CITE_GROUP = /\[(\d+(?:\s*[,;–-]\s*\d+)*)\]/g;
 
-// A range wider than this is not a citation (a year span, a page range) and is left as written
+// Wider is a year span or page range, not a citation
 const MAX_RANGE = 20;
 
-/** The citation numbers in one marker's inside: "4, 5" -> [4, 5], "4-6" -> [4, 5, 6]. */
 export function citeNumbers(group: string): number[] {
   const numbers: number[] = [];
   for (const part of group.split(/\s*[,;]\s*/)) {
@@ -18,7 +16,7 @@ export function citeNumbers(group: string): number[] {
   return numbers;
 }
 
-/** A Highlight over its page, in percent of the page so it stays in place at any zoom */
+/** In percent of the page, so it stays in place at any zoom */
 export const highlightStyle = (r: Region) =>
   ({
     position: 'absolute',

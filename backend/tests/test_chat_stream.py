@@ -1,5 +1,4 @@
-"""Unit tests for GET /chat/stream. workflow.astream is faked, so no Neo4j or LLM needed -- these
-mimic the exact event shapes measured live against the real graph (see the plan)."""
+"""GET /chat/stream with workflow.astream faked to the event shapes the real graph emits."""
 import asyncio
 import json
 
@@ -124,10 +123,7 @@ def test_citations_precede_tokens_leaked_nodes_filtered_newline_survives(stubbed
 
 
 def test_disconnect_mid_stream_persists_partial_answer_as_incomplete(stubbed, monkeypatch):
-    # An endless fake stream: the point is that stream_answer is closed from the *outside*
-    # (aclose(), what uvicorn's task cancellation does to a suspended async generator on a real
-    # client disconnect -- confirmed empirically that the equivalent sync-generator design left a
-    # killed connection's answer unsaved even after 17+ seconds, which is why this is now async).
+    # Endless stream closed from outside with aclose(), as uvicorn does on a client disconnect
     async def fake_stream(state, stream_mode):
         yield ("updates", {"fuse": {"contexts": []}})
         yield ("messages", (FakeChunk("partial"), {"langgraph_node": "generate"}))

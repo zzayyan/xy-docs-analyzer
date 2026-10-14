@@ -1,4 +1,4 @@
-"""HTTP API for the Graph tab. The store is faked, so no Neo4j needed (prior art: test_table_api.py)."""
+"""HTTP API for the Graph tab. Store faked."""
 import pytest
 from fastapi.testclient import TestClient
 

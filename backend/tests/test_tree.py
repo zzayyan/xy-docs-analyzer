@@ -1,4 +1,4 @@
-"""Unit tests for section tree construction. No Neo4j or Ollama needed."""
+"""Section tree construction."""
 from app.ingest.tree import build_sections, infer_levels
 
 

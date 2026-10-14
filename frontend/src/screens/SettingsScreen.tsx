@@ -18,7 +18,6 @@ import { useLang } from '../lib/i18n';
 
 type Page = 'account' | 'users' | 'models';
 
-/** #/settings/{page}: a sub-nav on the left, one page on the right. Users and Models are for admins only. */
 export function SettingsScreen({ user, page }: { user: User; page: string | undefined }) {
   const { t } = useLang();
   const pages: Page[] = user.role === 'admin' ? ['account', 'users', 'models'] : ['account'];
@@ -243,7 +242,6 @@ function UserRowView({ user, self, onChanged }: { user: UserRow; self: boolean; 
   );
 }
 
-/** A native <dialog> holding a form, styled like ConfirmDialog. */
 function FormDialog(props: {
   open: boolean;
   title: string;
@@ -384,7 +382,7 @@ function ModelsPage() {
       />
       {settingsQuery.isError && <p className="settings-error">{t.errorGeneric}</p>}
       {settingsQuery.isPending && <div className="settings-card skeleton-block" style={{ height: 320 }} />}
-      {/* Keyed on the loaded values, so a save or a reset starts the form over from what the server holds */}
+      {/* Keyed on the loaded values, so a save or reset restarts the form */}
       {settingsQuery.data && <ModelsForm key={JSON.stringify(settingsQuery.data)} loaded={settingsQuery.data} />}
       <EmbeddingCard />
     </>
@@ -407,7 +405,6 @@ function ModelsForm({ loaded }: { loaded: ModelSettingsView }) {
 
   const done = (view: ModelSettingsView) => {
     queryClient.setQueryData(['model-settings'], view);
-    // The chat's model picker reads /models
     queryClient.invalidateQueries({ queryKey: ['models'] });
   };
   const save = useMutation({
@@ -631,12 +628,11 @@ function EmbeddingCard() {
   const embeddingQuery = useQuery({
     queryKey: ['embedding-settings'],
     queryFn: api.embeddingSettings,
-    // Polled while a re-index runs, for its progress
     refetchInterval: (query) => (query.state.data?.reindex.status === 'running' ? 1500 : false),
   });
   const data = embeddingQuery.data;
   if (!data) return embeddingQuery.isError ? <p className="settings-error">{t.errorGeneric}</p> : null;
-  // Keyed on what the server holds apart from progress, so a finished switch starts the form over
+  // Keyed on server values minus progress, so a finished switch restarts the form
   const { reindex, ...loaded } = data;
   return <EmbeddingForm key={JSON.stringify(loaded)} loaded={data} reindex={reindex} />;
 }

@@ -1,6 +1,4 @@
-// Thin fetch wrapper over the FastAPI backend (backend/app/api.py). Types are hand-written to
-// mirror its Pydantic response models rather than generated — see that file's models if this
-// drifts; codegen from /openapi.json is worth it once the API grows past ~20 endpoints.
+// Types are hand-written to mirror backend/app/api.py's Pydantic models; codegen from /openapi.json if they drift.
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
@@ -23,7 +21,7 @@ export interface UserRow extends User {
   created_at: number | null;
 }
 
-/** Keys come back masked ("••••a1b2"); sending null keeps the stored key. */
+/** Keys come back masked; sending null keeps the stored key. */
 export interface ModelSettings {
   llm_provider: 'ollama' | 'openai';
   llm_base_url: string;
@@ -57,7 +55,6 @@ export interface Reindex {
 
 export interface EmbeddingSettingsView extends EmbeddingSettings {
   saved: boolean;
-  /** Chunks holding a vector, and what those vectors were made with */
   chunks: number;
   stored_model: string | null;
   stored_dim: number | null;
@@ -77,7 +74,6 @@ export interface ModelTestResult {
   ok: boolean;
   latency_ms: number;
   reply: string | null;
-  /** The vector size an embedding model returned */
   dim: number | null;
   error: string | null;
 }
@@ -107,12 +103,11 @@ export interface Document {
   step_total: number | null;
   llm_model: string | null;
   has_original: boolean;
-  /** Pages in a PDF Original; only getDocument sends it */
+  /** Only getDocument sends it */
   page_count?: number | null;
 }
 
-/** One bounding box on one page of the Original -- what gets drawn as a Highlight. Top-left origin,
- * PDF points; page_width/page_height are the page's own size, so no separate lookup is needed to scale. */
+/** A Highlight box: top-left origin, PDF points, with its page's size for scaling. */
 export interface Region {
   page: number;
   l: number;
@@ -192,7 +187,6 @@ export interface TableExtraction {
   error: string | null;
   chunks_done: number | null;
   chunks_total: number | null;
-  /** Headings of the parts the run read, out of document_chunks: fewer when it was scoped (docs/adr/0004) */
   read_parts: string[] | null;
   document_chunks: number | null;
   read_all: boolean;
@@ -239,17 +233,14 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  // The session is an HttpOnly cookie on the API's origin, so every call has to send it
   const res = await fetch(`${API_URL}${path}`, { ...init, credentials: 'include' });
   if (!res.ok) {
-    // FastAPI's HTTPException body is {"detail": "..."}; fall back to the raw text
-    // for anything that didn't go through that path (e.g. a proxy error page).
+    // {"detail": ...} from FastAPI, else the raw text (a proxy error page, say)
     const body = await res.text();
     let detail = body;
     try {
       detail = JSON.parse(body).detail ?? body;
     } catch {
-      // not JSON, use the raw text as-is
     }
     throw new ApiError(res.status, detail);
   }
@@ -391,7 +382,6 @@ export const api = {
     request<EntityDetail>(`/documents/${docId}/graph/entity?key=${encodeURIComponent(key)}`),
 };
 
-/** Statuses that mean ingest is still running — used to decide whether to keep polling. */
 export function isInFlight(status: DocumentStatus): boolean {
   return status !== 'done' && status !== 'error';
 }

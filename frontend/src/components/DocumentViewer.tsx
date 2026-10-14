@@ -6,15 +6,11 @@ import { useLang } from '../lib/i18n';
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.25;
-// Width of every page at 100%; past the dialog's own width, the pages scroll sideways
 const PAGE_WIDTH = 820;
 
 const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(z / ZOOM_STEP) * ZOOM_STEP));
 
-/** The whole Original, page after page, opened at a citation with its Highlights drawn, and stepping
- * through the citations it came with. Pages are the same rendered PNGs the source panel shows, loaded
- * lazily as they scroll near, so a long document costs only the pages actually looked at. Built on
- * native <dialog> like ConfirmDialog: focus trap and Escape come free. */
+/** The whole Original, opened at a citation with its Highlights, pages loaded lazily as they scroll near. */
 export function DocumentViewer({
   docId,
   name,
@@ -26,7 +22,7 @@ export function DocumentViewer({
   docId: string;
   name: string;
   pageCount: number;
-  /** Only citations with regions: one without has nowhere in the document to point at */
+  /** Only citations with regions: one without has nowhere to point */
   citations: Citation[];
   startIndex: number;
   onClose: () => void;
@@ -42,20 +38,18 @@ export function DocumentViewer({
   const citation = citations[index];
   const [page, setPage] = useState(citation.regions[0].page);
 
-  // ponytail: every page placeholder takes the cited page's size; a document mixing page sizes shifts a
-  // little as its pages load
+  // ponytail: placeholders take the cited page's size; mixed page sizes shift a little as pages load
   const { page_width: pageW, page_height: pageH } = citation.regions[0];
 
   useEffect(() => {
     dialogRef.current?.showModal();
   }, []);
 
-  // Open at the citation, and move to each one stepped to
   useEffect(() => {
     highlightRef.current?.scrollIntoView({ block: 'center' });
   }, [index]);
 
-  // Zooming keeps the same spot of the document in the middle of the view
+  // Zoom keeps the same spot in the middle of the view
   const changeZoom = (update: (z: number) => number) => {
     const el = scrollRef.current;
     if (el) zoomAnchor.current = (el.scrollTop + el.clientHeight / 2) / el.scrollHeight;
@@ -68,7 +62,7 @@ export function DocumentViewer({
     zoomAnchor.current = null;
   }, [zoom]);
 
-  // Ctrl/⌘ + wheel zooms the pages, not the whole app. React's onWheel is passive and can't stop that.
+  // Ctrl/⌘ + wheel zooms the pages, not the app. React's onWheel is passive and can't stop that.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -81,7 +75,6 @@ export function DocumentViewer({
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
-  // The current page is the one under the middle of the view
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -101,7 +94,7 @@ export function DocumentViewer({
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      // The dialog box is filled edge to edge by its content, so a click on the dialog itself is the backdrop
+      // Content fills the dialog, so a click on the dialog itself is the backdrop
       onClick={(e) => e.target === e.currentTarget && dialogRef.current?.close()}
       style={{
         border: 'var(--stroke-hairline) solid var(--border-subtle)',
@@ -217,8 +210,7 @@ export function DocumentViewer({
                     src={api.pageImageUrl(docId, p)}
                     alt=""
                     loading="lazy"
-                    // Width and height only give the not-yet-loaded page its shape, so scrolling to a
-                    // far page lands where it will be
+                    // Placeholder size, so scrolling to a far page lands where it will be
                     width={pageW}
                     height={pageH}
                     style={{ display: 'block', width: '100%', height: 'auto', background: 'var(--surface-card)' }}
@@ -230,7 +222,7 @@ export function DocumentViewer({
                       firstHighlight = false;
                       return (
                         <div
-                          // Keyed by the citation too, so the pulse replays on every step to a citation
+                          // Keyed by citation too, so the pulse replays on every step
                           key={`${index}:${i}`}
                           ref={first ? highlightRef : undefined}
                           className="highlight-pulse"

@@ -1,8 +1,6 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 
-// Explicit shape (not inferred from `en` with `as const`) so `id`'s values can differ from
-// `en`'s while TypeScript still requires every key to be present: a missing Indonesian
-// string is a build error, not a silent fallback to English.
+// Explicit shape, so a missing Indonesian string is a build error, not a silent English fallback
 export interface Dict {
   appName: string;
   langEnglish: string;
@@ -729,7 +727,6 @@ export function LangProvider({ children }: { children: ReactNode }) {
     try {
       localStorage.setItem(STORAGE_KEY, next);
     } catch {
-      // best-effort persistence only
     }
   };
 

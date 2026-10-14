@@ -17,12 +17,12 @@ class State(TypedDict, total=False):
     question: str
     doc_id: str
     mode: str  # "short" | "long"
-    model: str | None  # the document's chosen LLM, or None for settings.llm_model
-    history: list[dict]  # prior {question, answer} turns, oldest first
-    language: str | None  # the Document Language, or None when ingest did not record one
-    search_queries: list[str]  # the question as 1-3 standalone search queries, for retrieval only
+    model: str | None
+    history: list[dict]
+    language: str | None
+    search_queries: list[str]
     retrieved: Annotated[list[dict], operator.add]  # parallel retrievers append here
-    contexts: list[dict]  # deduplicated, budgeted input for generate
+    contexts: list[dict]
     answer: str
 
 
@@ -34,9 +34,8 @@ SYSTEM_PROMPT = (
 
 MAX_SUB_QUERIES = 3
 
-# Which language the queries are written in. Without a Document Language they keep the question's; with
-# one they are written in it, because the keyword search, the outline and the graph's entity names only
-# match words the document itself uses (the embeddings are multilingual, the rest is not).
+# Queries go in the document's language when known: fulltext, outline and entity names only match the
+# document's own words (only the embeddings are multilingual)
 QUESTION_LANGUAGE = (
     "Write every query in the SAME language as the latest question: an English question gives English "
     "queries, an Indonesian question gives Indonesian queries, whatever language the examples below are in."
@@ -92,7 +91,6 @@ CONTEXTUALIZE_SYSTEM_PROMPT = (
 
 
 def contextualize_prompt(language: str | None) -> str:
-    """The contextualize prompt for a document in this language; for None, the question's own language."""
     if language:
         return CONTEXTUALIZE_SYSTEM_PROMPT.format(
             language_rule=DOCUMENT_LANGUAGE.format(language=language), keep_language=KEEP_DOCUMENT_LANGUAGE,
@@ -108,18 +106,11 @@ CITATION_MARKER = re.compile(r"\[\d+(?:\s*[,;–-]\s*\d+)*\]")
 
 
 def strip_citations(text: str) -> str:
-    """A prior turn's [n] markers are meaningless outside that turn -- the numbers are reassigned
-    fresh every turn from whatever fuse() retrieves this time -- and are noise at best, actively
-    misleading at worst (a small model can conflate an ordinal like "the third one" with a
-    same-shaped "[3]" sitting right next to it in the history transcript)."""
+    # A prior turn's [n] numbers mean nothing now, and a small model confuses "the third one" with "[3]"
     return CITATION_MARKER.sub("", text)
 
-# Graph facts are compact and relational, so they go first; then section/vector chunks; then KG evidence chunks
 SOURCE_PRIORITY = {"kg_facts": 0, "vector": 1, "tree": 1, "kg": 2}
 
-# How many prior turns feed the follow-up rewrite and the final answer's own conversational
-# memory. Not token-budgeted like fuse()'s context blocks -- a handful of turns is cheap relative
-# to the document context, and capping by count is simpler than tracking two separate budgets.
 MAX_HISTORY_TURNS = 6
 
 
@@ -128,28 +119,17 @@ def recent_history(state: State) -> list[dict]:
 
 
 def route(state: State) -> list[str]:
-    # Long documents keep vector search too: tree search depends on the model picking the right section,
-    # the graph only finds named entities, and a question about one clause or number can miss both
+    # Long documents keep vector search: a question about one clause or number can miss tree and graph both
     return ["tree_search", "kg_retrieve", "vector_retrieve"] if state["mode"] == "long" else ["vector_retrieve"]
 
 
 def contextualize(state: State) -> dict:
-    """Turn the question into the queries retrieval runs on, in one call:
-
-    - a follow-up ("what about the second one?") becomes standalone -- retrieval only ever sees the
-      query text, so without this it finds nothing relevant however much history generate() gets;
-    - a compound question ("compare the value and deadline of project A and project B") becomes one
-      query per thing it asks about, so each half gets its own search instead of one blurred query;
-    - a question asked in another language than the Document Language becomes queries in the Document
-      Language, in this same call, so a same-language question costs nothing extra.
-
-    Runs on every question, first turn included, since compound questions come first as often as not.
-    Any failure falls back to the question as asked: a worse search, never a failed answer."""
+    """One call that makes a follow-up standalone, splits a compound question into one query per thing,
+    and translates to the Document Language. Any failure falls back to the question as asked."""
     history = recent_history(state)
     transcript = "\n".join(f"Q: {h['question']}\nA: {strip_citations(h['answer'])}" for h in history)
     conversation = f"Conversation so far:\n{transcript}\n\n" if history else ""
-    # Said again right after the question: in the system prompt alone, Qwen3.5-4B kept an Indonesian
-    # question's queries in Indonesian for an English document, following the examples' language instead
+    # Repeated after the question: from the system prompt alone, small models followed the examples' language
     language = state.get("language")
     reminder = f"\n\nWrite the queries in {language}." if language else ""
     try:
@@ -161,9 +141,7 @@ def contextualize(state: State) -> dict:
     except Exception:
         queries = []
     queries = list(dict.fromkeys(queries))
-    # More than the cap means it split by aspect too ("precision of A", "recall of A", "precision of B",
-    # ...), and cutting the list would silently drop one of the things compared. The question as asked
-    # still covers all of them, just less sharply, so it is the safer query.
+    # Over the cap means it split by aspect too; truncating would silently drop a compared thing
     if len(queries) > MAX_SUB_QUERIES:
         queries = []
     return {"search_queries": queries or [state["question"]]}
@@ -174,29 +152,23 @@ def search_queries(state: State) -> list[str]:
 
 
 def _contexts(rows: list[dict], source: str) -> list[dict]:
-    """Tags each retrieved row with its source and decodes its regions -- a Neo4j property can't hold a
-    list of maps, so c.regions travels as JSON the same way Turn.citations does."""
     return [{**row, "source": source, "regions": json.loads(row.get("regions") or "[]")} for row in rows]
 
 
 def vector_retrieve(state: State) -> dict:
-    """One hybrid search per query (no model call, so cheap), interleaved best-first: fuse() keeps
-    blocks in this order until the token budget runs out, so every sub-question gets its top hits in
-    before any gets its tail."""
+    # Interleaved best-first, so every sub-question's top hits fit the budget before any one's tail
     per_query = [vector.search(state["doc_id"], q) for q in search_queries(state)]
     interleaved = [row for rank in zip_longest(*per_query) for row in rank if row is not None]
     return {"retrieved": _contexts(interleaved, "vector")}
 
 
 def tree_retrieve(state: State) -> dict:
-    # One model call for every sub-question: the outline is read once and sections picked for each
     query = "\n".join(search_queries(state))
     chunks = tree_search.search(state["doc_id"], query, model=state.get("model"))
     return {"retrieved": _contexts(chunks, "tree")}
 
 
 def kg_retrieve(state: State) -> dict:
-    # One entity extraction over every sub-question, rather than one call each
     query = "\n".join(search_queries(state))
     facts, chunks = kg.search(state["doc_id"], query, model=state.get("model"))
     retrieved = _contexts(chunks, "kg")
@@ -225,8 +197,6 @@ def fuse(state: State) -> dict:
 
 
 def to_citations(contexts: list[dict]) -> list[dict]:
-    """Citation entries for the frontend: includes chunk text so drill-down needs no extra lookup, and
-    survives a chunk being deleted or re-ingested later (sent live, and persisted with the Turn)."""
     return [
         {
             "n": n,
@@ -246,8 +216,6 @@ def generate(state: State) -> dict:
     blocks = "\n\n".join(
         f"[{n}] (pages: {c['pages'] or '-'})\n{c['text']}" for n, c in enumerate(contexts, start=1)
     )
-    # Prior turns as real conversational messages (not text stuffed into the prompt), so pronoun
-    # references, tone, and "you already told me X" carry over the way a chat is expected to.
     history_messages = [
         msg for h in recent_history(state) for msg in (("human", h["question"]), ("ai", strip_citations(h["answer"])))
     ]
@@ -269,7 +237,7 @@ builder.add_node("generate", generate)
 builder.add_edge(START, "contextualize")
 builder.add_conditional_edges("contextualize", route, ["vector_retrieve", "tree_search", "kg_retrieve"])
 builder.add_edge("vector_retrieve", "fuse")
-builder.add_edge(["tree_search", "kg_retrieve"], "fuse")  # waits for both parallel branches
+builder.add_edge(["tree_search", "kg_retrieve"], "fuse")
 builder.add_edge("fuse", "generate")
 builder.add_edge("generate", END)
 workflow = builder.compile()

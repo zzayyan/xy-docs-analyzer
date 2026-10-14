@@ -19,7 +19,6 @@ import { useLang } from '../lib/i18n';
 type SimNode = GraphNode & SimulationNodeDatum;
 type SimLink = SimulationLinkDatum<SimNode> & { type: string };
 
-// The eight node types app/ingest/kg.py extracts, each on a palette token
 const TYPE_COLOR: Record<string, string> = {
   Person: 'var(--xy-blue-600)',
   Organization: 'var(--brand-primary)',
@@ -31,7 +30,7 @@ const TYPE_COLOR: Record<string, string> = {
   Date: 'var(--xy-grey-500)',
 };
 const OTHER_COLOR = 'var(--xy-grey-400)';
-// Labels for this many of the most mentioned entities; the rest show theirs on hover or selection
+// Labels for the top N; the rest show on hover or selection
 const LABELLED = 25;
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 4;
@@ -41,7 +40,6 @@ const colorOf = (type: string | null) => (type && TYPE_COLOR[type]) || OTHER_COL
 const radiusOf = (n: GraphNode) => 4 + 3 * Math.sqrt(n.mentions);
 const labelText = (name: string) => (name.length > 32 ? `${name.slice(0, 30)}…` : name);
 
-/** The zoom and offset that fit these nodes into a w x h viewport, with a margin, never zooming past 1.5x */
 function fitTransform(nodes: SimNode[], w: number, h: number) {
   if (nodes.length === 0 || w === 0 || h === 0) return { x: 0, y: 0, k: 1 };
   const xs = nodes.map((n) => n.x ?? 0);
@@ -53,16 +51,12 @@ function fitTransform(nodes: SimNode[], w: number, h: number) {
 
 const endKey = (end: SimLink['source']) => (typeof end === 'object' ? (end as SimNode).key : String(end));
 
-/** The document's knowledge graph, drawn as a force layout: its most mentioned entities first, and any
- * entity's neighbours pulled in when it is selected, so the graph can be explored past the first cut.
- * Selecting an entity lists its relations and the passages that mention it; a passage opens in the same
- * SourcePanel a chat citation does, page highlight included. */
+/** Force layout of the most mentioned entities; selecting one pulls in its neighbours. */
 export function GraphPanel({ docId }: { docId: string }) {
   const { t } = useLang();
   const graphQuery = useQuery({ queryKey: ['graph', docId], queryFn: () => api.graph(docId) });
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  // Entities and relations pulled in from selected entities' neighbourhoods, on top of the first cut;
-  // anchor is the entity they came from, so they appear next to it rather than at the origin
+  // Pulled in from selected entities; anchor is the entity they came from, so they appear next to it
   const [extra, setExtra] = useState<{ nodes: GraphNode[]; edges: GraphEdge[]; anchor: string | null }>({
     nodes: [],
     edges: [],
@@ -85,15 +79,13 @@ export function GraphPanel({ docId }: { docId: string }) {
   const [hovered, setHovered] = useState<string | null>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
-  // Viewport, declared ahead of the layout effect that frames the first layout in it
   const svgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
 
   // ---- Layout ----
   const simRef = useRef<Simulation<SimNode, SimLink> | null>(null);
-  // The simulation mutates its node objects in place; each tick copies them into state, which is what
-  // render reads. nodesRef is the same nodes by key, for effects and event handlers.
+  // The simulation mutates nodes in place; each tick copies them into state for render
   const nodesRef = useRef(new Map<string, SimNode>());
   const linksRef = useRef<SimLink[]>([]);
   const [frame, setFrame] = useState<{ nodes: SimNode[]; links: SimLink[] }>({ nodes: [], links: [] });
@@ -106,7 +98,6 @@ export function GraphPanel({ docId }: { docId: string }) {
     const nodes = new Map<string, SimNode>();
     for (const n of [...base.nodes, ...extra.nodes]) {
       if (nodes.has(n.key)) continue;
-      // New entities appear next to the one whose neighbourhood brought them in, not at the origin
       nodes.set(n.key, known.get(n.key) ?? { ...n, x: (anchor?.x ?? 0) + Math.random() * 40 - 20, y: (anchor?.y ?? 0) + Math.random() * 40 - 20 });
     }
     const seen = new Set<string>();
@@ -130,16 +121,13 @@ export function GraphPanel({ docId }: { docId: string }) {
       .force('charge', forceManyBody().strength(-140))
       .force('center', forceCenter(0, 0))
       .force('collide', forceCollide<SimNode>().radius((d) => radiusOf(d) + 3))
-      // A gentle pull to the middle: without it, entities with no relation drift far out and the view
-      // fitted around them leaves the connected graph tiny
+      // Without a pull to the middle, unrelated entities drift out and shrink the fitted view
       .force('x', forceX(0).strength(0.08))
       .force('y', forceY(0).strength(0.08));
     if (first) {
-      // Most of the first layout runs here, off-screen: rendering every tick of it redraws a few hundred
-      // SVG elements per frame for seconds. What is left still animates, so the graph visibly settles.
+      // Most of the first layout runs off-screen: rendering every tick redraws hundreds of SVG elements
       sim.stop().alpha(1).tick(PRESETTLE_TICKS);
       sim.alpha(0.3).restart();
-      // Opens framed on the whole graph rather than at 1x, where much of it sat off-screen
       requestAnimationFrame(() => {
         const el = svgRef.current;
         if (el) setView(fitTransform(sim.nodes(), el.clientWidth, el.clientHeight));
@@ -213,7 +201,7 @@ export function GraphPanel({ docId }: { docId: string }) {
   const onWheel = (e: React.WheelEvent) => {
     const rect = svgRef.current!.getBoundingClientRect();
     const k = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, view.k * Math.exp(-e.deltaY * 0.0015)));
-    // Zoom around the cursor: the graph point under it stays under it
+    // Zoom around the cursor
     const cx = e.clientX - rect.left - size.w / 2;
     const cy = e.clientY - rect.top - size.h / 2;
     setView({ k, x: cx - ((cx - view.x) * k) / view.k, y: cy - ((cy - view.y) * k) / view.k });
@@ -234,7 +222,6 @@ export function GraphPanel({ docId }: { docId: string }) {
   const nodes = frame.nodes.filter((n) => !hiddenTypes.has(n.type ?? ''));
   const visible = new Set(nodes.map((n) => n.key));
   const shownLinks = frame.links.filter((l) => visible.has(endKey(l.source)) && visible.has(endKey(l.target)));
-  // A few hundred nodes at most, so these are recomputed every frame rather than memoised
   const neighbours = new Set<string>();
   for (const l of selectedKey ? frame.links : []) {
     if (endKey(l.source) === selectedKey) neighbours.add(endKey(l.target));
@@ -242,8 +229,7 @@ export function GraphPanel({ docId }: { docId: string }) {
   }
   const all = frame.nodes;
   const labelled = new Set([...all].sort((a, b) => b.mentions - a.mentions).slice(0, LABELLED).map((n) => n.key));
-  // Labels are placed most important first and skipped where they would overlap one already placed;
-  // the selected and hovered entities always get theirs. Boxes are in graph units, as the labels are.
+  // Most important first, skipped where they would overlap; selected and hovered always get theirs
   const rank = (n: SimNode) =>
     n.key === selectedKey || n.key === hovered ? 3 : neighbours.has(n.key) ? 2 : labelled.has(n.key) ? 1 : 0;
   const placed: [number, number, number, number][] = [];
@@ -363,7 +349,7 @@ export function GraphPanel({ docId }: { docId: string }) {
                 </g>
               );
             })}
-            {/* Labels in their own layer over every node, so a node drawn later never covers one */}
+            {/* Own layer, so a node drawn later never covers a label */}
             {nodes
               .filter((n) => shownLabels.has(n.key))
               .map((n) => (
@@ -423,7 +409,6 @@ function EntityPanel({ entityKey, detail, loading, onSelect, onCitation, onClose
   const { t } = useLang();
   const entity = detail?.entity;
   const names = new Map((detail?.nodes ?? []).map((n) => [n.key, n]));
-  // One line per neighbour, with every relation to it: two models compared eight ways are one neighbour
   const relations = new Map<string, string[]>();
   for (const e of detail?.edges ?? []) {
     const outgoing = e.source === entityKey;

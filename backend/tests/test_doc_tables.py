@@ -1,5 +1,4 @@
-"""Ingest keeps the tables Docling recognises, whole, beside the chunks. A real Markdown conversion: no
-OCR or layout models load for Markdown, only the bge-m3 tokenizer the chunker counts with."""
+"""Ingest keeps Docling's tables whole beside the chunks. Real Markdown conversion: only the tokenizer loads."""
 from app.ingest.convert import convert
 
 ROWS = 60  # long enough that the chunker splits the table over several chunks

@@ -38,8 +38,8 @@ def infer_levels(headings: list[tuple[int, str]]) -> list[int]:
     if len({level for level, _ in headings if level > 0}) > 1:
         return [level for level, _ in headings]
 
-    # ponytail: numbering heuristic for flat (typical PDF) headings. Unnumbered headings always nest under the
-    # last numbered one, so a trailing unnumbered top-level section gets mis-nested; tree search still sees summaries.
+    # ponytail: unnumbered headings nest under the last numbered one, so a trailing unnumbered top-level
+    # section gets mis-nested; tree search still sees summaries
     levels, letter_base, last_numbered = [], 0, 0
     for _, title in headings:
         if LETTER.match(title):
@@ -57,7 +57,7 @@ def normalize(text: str) -> str:
 
 
 def build_sections(file_id: str, headings: list[tuple[int, str]], chunks: list[dict]) -> tuple[list[dict], dict[str, str]]:
-    """Return (sections in document order, chunk_id -> section_id). No LLM or database access."""
+    """(sections in document order, chunk_id -> section_id)."""
     sections: list[dict] = []
     chunk_section: dict[str, str] = {}
 
@@ -77,7 +77,7 @@ def build_sections(file_id: str, headings: list[tuple[int, str]], chunks: list[d
             sections.append(section)
             stack.append(section)
 
-        # Chunks and headings share document order: move forward to the section matching the chunk's deepest heading
+        # Chunks and headings share document order, so the match only moves forward
         position = 0
         for chunk in chunks:
             if chunk["headings"]:
@@ -88,7 +88,6 @@ def build_sections(file_id: str, headings: list[tuple[int, str]], chunks: list[d
                 )
             chunk_section[chunk["id"]] = sections[position]["id"]
     else:
-        # No headings at all: fixed-size groups of chunks become flat pseudo-sections
         for start in range(0, len(chunks), FALLBACK_GROUP_CHUNKS):
             order = len(sections)
             section = {"id": f"{file_id}:s{order}", "order": order, "title": f"Part {order + 1}", "level": 1, "parent": None}
@@ -126,7 +125,6 @@ def summarize_sections(
 
     def summarize(section: dict) -> str:
         if section["id"] not in texts:
-            # Container heading with no body text: its children describe it, no LLM call needed
             return "Contains: " + "; ".join(child_titles.get(section["id"], []))
         text = "\n\n".join(texts[section["id"]])[:SUMMARY_MAX_CHARS]
         messages = [("system", SUMMARY_PROMPT), ("human", f"Section: {section['title']}\n\n{text}")]
@@ -135,11 +133,9 @@ def summarize_sections(
                 return llm().invoke(messages).content.strip()
             except Exception:
                 pass
-        # A summary only helps tree search pick sections; the title still does that, less well, and one
-        # flaky call is no reason to fail a Document after its whole conversion
+        # The title still guides tree search; one flaky call should not fail the Document
         return section["title"]
 
-    # One independent LLM call per section, so they run together; map() keeps document order
     with ThreadPoolExecutor(max_workers=settings.llm_concurrency) as pool:
         summaries = pool.map(summarize, sections)
         try:
@@ -148,7 +144,7 @@ def summarize_sections(
                 if on_progress:
                     on_progress(done, len(sections))
         finally:
-            summaries.close()  # a raise in on_progress (Document deleted) cancels sections not yet started
+            summaries.close()  # on Deleted, cancels sections not yet started
 
 
 def store_tree(file_id: str, sections: list[dict], chunk_section: dict[str, str]) -> None:

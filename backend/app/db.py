@@ -12,17 +12,13 @@ SCHEMA = [
     "CREATE CONSTRAINT user_id IF NOT EXISTS FOR (u:User) REQUIRE u.id IS UNIQUE",
     "CREATE CONSTRAINT user_username IF NOT EXISTS FOR (u:User) REQUIRE u.username IS UNIQUE",
     "CREATE CONSTRAINT session_id IF NOT EXISTS FOR (s:Session) REQUIRE s.id IS UNIQUE",
-    # Concurrent first startups could each MERGE their own embedding marker; drop the extras so the
-    # constraint can be created on databases that already have them
+    # Concurrent first startups could each MERGE a marker; drop extras so the constraint can be created
     "MATCH (m:Meta) WITH m.key AS key, collect(m) AS ms WHERE size(ms) > 1 UNWIND tail(ms) AS m DELETE m",
     "CREATE CONSTRAINT meta_key IF NOT EXISTS FOR (m:Meta) REQUIRE m.key IS UNIQUE",
-    # Vector search scores a file's own chunks exactly (app/retrieval/vector.py), so the old global
-    # vector index only costs writes; dropped here once for databases that still have it
+    # Unused since vector search scans per file; only cost writes
     "DROP INDEX chunk_embedding IF EXISTS",
     "CREATE FULLTEXT INDEX chunk_text IF NOT EXISTS FOR (c:Chunk) ON EACH [c.text]",
     "CREATE INDEX entity_key IF NOT EXISTS FOR (e:__Entity__) ON (e.file_id, e.key)",
-    # Every per-document read and the cascade delete match on file_id; without these each is a scan of
-    # that label across every document in the database
     "CREATE INDEX chunk_file IF NOT EXISTS FOR (c:Chunk) ON (c.file_id)",
     "CREATE INDEX section_file IF NOT EXISTS FOR (s:Section) ON (s.file_id)",
     "CREATE INDEX turn_file IF NOT EXISTS FOR (t:Turn) ON (t.file_id)",
@@ -49,8 +45,7 @@ def check_embedding_model(g: Neo4jGraph) -> None:
     """Refuse to mix embeddings from different models, which a dimension check alone does not catch."""
     stored = g.query(READ_MARKER, {"model": settings.embed_model, "dim": settings.embed_dim})[0]
     if stored["model"] == settings.embed_model and stored["dim"] == settings.embed_dim:
-        # The marker only knows what it was told, so confirm it against a vector that is actually stored:
-        # a database written before the marker existed can still hold vectors of another size
+        # A database from before the marker can still hold vectors of another size
         sample = g.query("MATCH (c:Chunk) WHERE c.embedding IS NOT NULL RETURN size(c.embedding) AS dim LIMIT 1")
         if sample and sample[0]["dim"] != settings.embed_dim:
             chunks = g.query("MATCH (c:Chunk) WHERE c.embedding IS NOT NULL RETURN count(c) AS n")[0]["n"]
@@ -67,7 +62,6 @@ def check_embedding_model(g: Neo4jGraph) -> None:
             new=settings.embed_model, new_dim=settings.embed_dim,
         ))
 
-    # Nothing embedded yet, so adopt the new model
     g.query(
         "MATCH (m:Meta {key: 'embedding'}) SET m.model = $model, m.dim = $dim",
         {"model": settings.embed_model, "dim": settings.embed_dim},
@@ -82,10 +76,9 @@ def graph() -> Neo4jGraph:
         password=settings.neo4j_password,
         refresh_schema=False,
     )
-    # Schema first, so the marker MERGE in check_embedding_model runs under the meta_key constraint
+    # Schema first, so the marker MERGE below runs under the meta_key constraint
     for statement in SCHEMA:
         g.query(statement)
-    # Then the models saved in Settings, so the check sees the embedding model actually in use
     from app import model_settings
     model_settings.load(g)
     check_embedding_model(g)

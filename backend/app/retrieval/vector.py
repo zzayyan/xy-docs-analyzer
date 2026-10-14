@@ -5,10 +5,9 @@ from app.models import embeddings
 
 LUCENE_SPECIAL = re.compile(r'[+\-&|!(){}\[\]^"~*?:\\/]')
 
-# Exact scoring over one file's own chunks, not the approximate global index: an index query returns
-# the nearest chunks across every document, so a file's chunks could all fall outside the candidates.
-# ponytail: a full scan of the file's chunks, fine up to MAX_PAGES (~800 chunks); an index with
-# filtering (Neo4j 2025+ SEARCH) if documents grow far past that.
+# Exact scan of one file's chunks: the global index returns nearest chunks across every document, so a
+# file's own could all miss the candidates.
+# ponytail: full scan, fine up to MAX_PAGES (~800 chunks); filtered index (Neo4j 2025+ SEARCH) past that
 VECTOR_QUERY = """
 MATCH (node:Chunk {file_id: $file_id})
 WITH node, vector.similarity.cosine(node.embedding, $vector) AS score
@@ -26,7 +25,7 @@ LIMIT $k
 
 
 def search(file_id: str, question: str, k: int = 6) -> list[dict]:
-    """Hybrid search over one file's chunks: vector + fulltext, merged with reciprocal rank fusion."""
+    """Vector + fulltext, merged with reciprocal rank fusion."""
     ranked_lists = [graph().query(VECTOR_QUERY, {
         "vector": embeddings().embed_query(question),
         "file_id": file_id,

@@ -1,5 +1,4 @@
-"""HTTP API for Table Extractions. The store and the model are faked, so no Neo4j or LLM needed
-(prior art: test_chat_stream.py)."""
+"""HTTP API for Table Extractions. Store and model faked."""
 import io
 
 import openpyxl

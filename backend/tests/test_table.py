@@ -1,5 +1,4 @@
-"""Table Extraction over every chunk of a document. The model is faked, so no LLM or Neo4j needed
-(prior art: test_kg_parallel.py, which pins the same ordering and failure behaviour for graph extraction)."""
+"""Table Extraction with the model faked."""
 import threading
 import time
 
@@ -25,8 +24,7 @@ def document_model(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_duplicates(monkeypatch):
-    """The merge pass is one more model call; tests that are not about merging find no duplicates, so
-    they never reach a real model. Merge tests replace this with their own answer."""
+    """No duplicates unless a merge test says otherwise."""
     monkeypatch.setattr(table, "find_duplicates", lambda rows, columns, model: [])
 
 

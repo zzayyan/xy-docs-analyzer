@@ -1,4 +1,4 @@
-"""Retrying a failed ingest from the kept Original. Store and ingest are faked, so no Neo4j needed."""
+"""Retrying an ingest from the kept Original. Store and ingest faked."""
 from fastapi.testclient import TestClient
 
 import app.api as api_module

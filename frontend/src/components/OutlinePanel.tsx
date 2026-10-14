@@ -3,8 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, type Section } from '../lib/api';
 import { useLang } from '../lib/i18n';
 
-/** Section tree for a long-mode document, built client-side from the flat list app/store.py
- * returns (each row carries parent_id). Selecting a section loads its own chunks on the right. */
+/** Section tree built client-side from the flat list (each row carries parent_id). */
 export function OutlinePanel({ docId }: { docId: string }) {
   const { t } = useLang();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -114,8 +113,7 @@ function SectionDetail({ docId, section }: { docId: string; section: Section }) 
             <span key={m}>{m}</span>
           ))}
         </span>
-        {/* app/ingest/tree.py summarizes a heading with no body text as "Contains: <children>";
-            a childless one leaves a bare "Contains:", which isn't worth showing. */}
+        {/* A childless container's summary is a bare "Contains:" */}
         {section.summary && section.summary.trim() !== 'Contains:' && (
           <p style={{ margin: '4px 0 0', lineHeight: 'var(--lh-body)', color: 'var(--text-card-body)' }}>{section.summary}</p>
         )}

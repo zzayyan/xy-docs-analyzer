@@ -7,9 +7,6 @@ interface StageTrackProps {
   mode: 'short' | 'long' | null;
 }
 
-/** Compact ingest-stage breadcrumb: done stages dim, the current one is highlighted, the rest are
- * muted. Not the design system's StepFlow — that's sized for slide decks (64px ringed icons); this
- * needs to fit inline above a progress bar. */
 export function StageTrack({ status, mode }: StageTrackProps) {
   const { t } = useLang();
   const stages = stagesFor(mode);

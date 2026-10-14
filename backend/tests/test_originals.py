@@ -1,5 +1,4 @@
-"""The Original is kept on disk after upload, served back, and removed with its Document. The store and
-ingest are faked, so no Neo4j or LLM needed."""
+"""Originals: kept on upload, served, removed with their Document. Store and ingest faked."""
 import io
 
 import pypdfium2

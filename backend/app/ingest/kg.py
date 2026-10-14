@@ -43,9 +43,7 @@ ATTEMPTS = 3
 
 
 def extract_one(text: str):
-    """One LLM call, no database access, so it is safe to run many at once. None when every attempt
-    failed: the graph only helps retrieval, and the chunk stays findable through the outline and vector
-    search, so one bad chunk is skipped rather than failing a whole Document after its conversion."""
+    """None when every attempt failed: the chunk stays findable via outline and vectors, so skip it."""
     for _ in range(ATTEMPTS):
         try:
             [doc] = transformer().convert_to_graph_documents([Document(page_content=text)])
@@ -56,12 +54,9 @@ def extract_one(text: str):
 
 
 def extract_graph(file_id: str, chunks: list[dict], on_progress: Callable[[int, int], None] | None = None) -> int:
-    """Extract entities and relationships per chunk and link each chunk to the entities it mentions.
-    Returns how many chunks were skipped because extraction kept failing on them."""
+    """Returns how many chunks were skipped."""
     skipped = 0
-    # Extraction is one HTTP call per chunk, so it parallelises; the writes stay on this thread because
-    # concurrent MERGE on the same __Entity__ nodes deadlocks in Neo4j. map() keeps chunk order, and
-    # consuming it inside the pool interleaves writes with extraction so progress moves while work runs.
+    # Extraction runs in parallel; writes stay on this thread since concurrent MERGE on shared entities deadlocks
     with ThreadPoolExecutor(max_workers=settings.llm_concurrency) as pool:
         extracted = pool.map(extract_one, [chunk["text"] for chunk in chunks])
         try:
@@ -73,9 +68,7 @@ def extract_graph(file_id: str, chunks: list[dict], on_progress: Callable[[int, 
                 if on_progress:
                     on_progress(done, len(chunks))
         finally:
-            # A raise in the loop (the Document was deleted) cancels every chunk not yet started,
-            # instead of the pool's exit waiting for all of them to run
-            extracted.close()
+            extracted.close()  # on Deleted, cancels chunks not yet started
     return skipped
 
 

@@ -13,8 +13,7 @@ const SOURCE_LABEL_KEY = {
   table: 'citationSourceTable',
 } as const;
 
-/** Docked beside the conversation instead of a modal overlay, so the answer that cites it stays
- * readable while the source is open. */
+/** Docked beside the conversation, not a modal, so the citing answer stays readable. */
 export function SourcePanel({
   docId,
   citation,
@@ -25,15 +24,12 @@ export function SourcePanel({
   docId: string;
   citation: Citation;
   onClose: () => void;
-  /** Opened by "follow sources" during a streaming answer: the highlight pulses and scrolls in smoothly */
+  /** Opened by "follow sources": the highlight pulses and scrolls smoothly */
   pulse?: boolean;
-  /** The citations this one came with (one answer's, one row's, one entity's), to step through in the
-   * document viewer */
+  /** Citations to step through in the document viewer */
   citations?: Citation[];
 }) {
   const { t } = useLang();
-  // Same query key ChatPanel already uses for its own reasons, so this reads from cache there instead
-  // of firing a second request; TablePanel, which fetches no document today, gets this one for free.
   const doc = useQuery({ queryKey: ['document', docId], queryFn: () => api.getDocument(docId) }).data;
 
   const [viewing, setViewing] = useState(false);
@@ -54,18 +50,15 @@ export function SourcePanel({
   ];
   if (citation.headings.length > 0) rows.push([t.citationHeadings, citation.headings.join(' / ')]);
 
-  // Non-PDF Documents, Documents without a kept Original, and a citation whose chunk predates
-  // Highlights (no regions) all keep the plain text view -- unconditionally, no migration needed.
+  // No PDF, no kept Original, or no regions: plain text view
   const showPage = !!doc?.has_original && doc.name.toLowerCase().endsWith('.pdf') && citation.regions.length > 0;
   const canView = showPage && !!doc.page_count;
-  // The viewer steps through the siblings that point somewhere in the document, this one included
   const withRegions = citations.filter((c) => c.regions.length > 0);
   const startIndex = withRegions.findIndex((c) => c.chunk_id === citation.chunk_id && c.n === citation.n);
   const viewerCitations = startIndex >= 0 ? withRegions : [citation];
 
   return (
-    // Delimited, not concatenated: chunk_id ends in digits, so "f:1"+"23" and "f:12"+"3" would collide,
-    // and PageHighlightView's page state relies on this key changing for every new citation.
+    // Delimited: chunk_id ends in digits, so "f:1"+"23" would collide with "f:12"+"3"
     <aside className="source-panel" key={`${citation.chunk_id}#${citation.n}`}>
       <div
         style={{
@@ -138,9 +131,7 @@ export function SourcePanel({
   );
 }
 
-/** The Original's page with every region of the cited Chunk marked as a Highlight, and page
- * navigation when the Chunk spans several. A child of SourcePanel's keyed <aside>: that key resets
- * this component's state whenever the citation changes, so "current page" needs no effect to reset. */
+/** The cited page with its Highlights. The parent's key resets this state on every new citation. */
 function PageHighlightView({
   docId,
   regions,
@@ -150,7 +141,6 @@ function PageHighlightView({
   docId: string;
   regions: Region[];
   pulse: boolean;
-  /** Opens the whole document; the page becomes a button for it */
   onOpen?: () => void;
 }) {
   const { t } = useLang();

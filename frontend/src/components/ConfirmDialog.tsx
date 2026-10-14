@@ -12,9 +12,7 @@ interface ConfirmDialogProps {
   onCancel: () => void;
 }
 
-/** Built on native <dialog>: focus trap, Escape-to-close, and backdrop click come free from the
- * platform, so there's no reason to hand-roll a modal. Not in the design system's component set,
- * so it's styled from the same tokens directly. */
+/** Native <dialog>: focus trap, Escape and backdrop click come free. */
 export function ConfirmDialog({ open, title, body, confirmLabel, danger, onConfirm, onCancel }: ConfirmDialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const { t } = useLang();

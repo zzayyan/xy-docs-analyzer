@@ -1,5 +1,4 @@
-"""Read and delete Cypher for File/Section/Chunk/Turn/TableExtraction, kept out of app/api.py so routing and queries
-don't tangle. Writes made during ingest stay in app/ingest/pipeline.py, app/ingest/tree.py, app/ingest/kg.py."""
+"""Cypher for the API's reads and deletes. Ingest writes live in app/ingest/."""
 import json
 import uuid
 
@@ -13,11 +12,8 @@ ORDER BY coalesce(f.created_at, 0) DESC
 
 GET_FILE = "MATCH (f:File {id: $id}) RETURN f {.*} AS file"
 
-# The File goes first: every write that creates nodes is anchored on MATCH (f:File) or on a Chunk deleted
-# further down, so once the File is gone an ingest still running writes nothing new, and the statements
-# after it (scoped by file_id, not traversal) sweep whatever it wrote before. File last would leave a
-# window where chunks written between the Chunk and File statements survive, orphaned. Meta is never
-# touched: it is global (the active embedding model marker), not per-document.
+# File first: ingest writes anchor on MATCH (f:File), so a running ingest stops writing and the sweeps
+# below catch what it already wrote. File last would leave a window for orphaned chunks.
 DELETE_FILE_CASCADE = [
     "MATCH (f:File {id: $id}) DETACH DELETE f",
     "MATCH (n:Chunk {file_id: $id}) DETACH DELETE n",
@@ -50,8 +46,6 @@ RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings, c.r
 ORDER BY c.idx
 """
 
-# Same rows as ALL_CHUNKS, but for callers that only need the opening of the document (proposing
-# columns), so a 200-page document is not read in full for a single prompt.
 FIRST_CHUNKS = ALL_CHUNKS + "LIMIT $limit"
 
 DOC_TABLES = """
@@ -61,8 +55,7 @@ RETURN t.id AS id, t.idx AS idx, t.caption AS caption, t.markdown AS markdown, t
 ORDER BY t.idx
 """
 
-# Columns and rows are JSON-encoded for the same reason citations are: a Neo4j property cannot hold
-# a list of maps.
+# JSON-encoded: a Neo4j property cannot hold a list of maps
 CREATE_TABLE_EXTRACTION = """
 MATCH (f:File {id: $file_id})
 CREATE (f)-[:HAS_TABLE]->(:TableExtraction {
@@ -73,14 +66,13 @@ CREATE (f)-[:HAS_TABLE]->(:TableExtraction {
 
 SET_TABLE_EXTRACTION = "MATCH (e:TableExtraction {id: $id}) SET e += $props, e.updated_at = timestamp()"
 
-# A run's own final write: a cancel that landed while the run was merging rows stays cancelled
+# A cancel that lands while the run is merging rows stays cancelled
 FINISH_TABLE_EXTRACTION = """
 MATCH (e:TableExtraction {id: $id}) WHERE e.status = 'running'
 SET e += $props, e.updated_at = timestamp()
 """
 
-# Rows are left out on purpose: the list is a history sidebar, and a document's rows can run to
-# thousands of chunk quotes each. Open one to get its rows, through GET_TABLE_EXTRACTION.
+# No rows: they can run to thousands of chunk quotes
 LIST_TABLE_EXTRACTIONS = """
 MATCH (e:TableExtraction {file_id: $file_id})
 RETURN e {.id, .request, .columns, .status, .progress, .error, .chunks_done, .chunks_total,
@@ -99,8 +91,6 @@ RETURN t.id AS id, t.question AS question, t.answer AS answer, t.citations AS ci
 ORDER BY t.created_at
 """
 
-# What a new question needs of the conversation so far: the latest complete turns, text only -- not every
-# Turn with its citations (chunk text included) re-read and decoded on every question.
 RECENT_TURNS = """
 MATCH (t:Turn {file_id: $file_id}) WHERE t.complete
 WITH t ORDER BY t.created_at DESC LIMIT $n
@@ -127,14 +117,12 @@ FAIL_INTERRUPTED = [
 
 
 def fail_interrupted(error: str) -> None:
-    """Marks every unfinished ingest and Table Extraction as failed. Only right at startup, before any
-    background task of this process has begun: nothing else can be running then."""
+    """Startup only: before any background task has begun, nothing unfinished can still be running."""
     for statement in FAIL_INTERRUPTED:
         graph().query(statement, {"error": error})
 
 
-# The knowledge graph as the Graph tab draws it: the most mentioned entities, and only the relationships
-# between two of them, so no edge points at a node that is not drawn.
+# Edges only between two top entities, so none points at an undrawn node
 GRAPH_TOP = """
 MATCH (e:__Entity__ {file_id: $file_id})
 WITH e, COUNT { (:Chunk)-[:MENTIONS]->(e) } AS mentions
@@ -152,7 +140,6 @@ MATCH (e:__Entity__ {file_id: $file_id, key: $key})
 RETURN e.key AS key, e.name AS name, e.type AS type, COUNT { (:Chunk)-[:MENTIONS]->(e) } AS mentions
 """
 
-# One step out from an entity, both directions, most mentioned neighbours first
 ENTITY_NEIGHBOURS = """
 MATCH (e:__Entity__ {file_id: $file_id, key: $key})-[r]-(n:__Entity__)
 WHERE n <> e
@@ -203,8 +190,7 @@ def delete_file(file_id: str) -> None:
         graph().query(statement, {"id": file_id})
 
 
-# What a failed ingest may have left behind, cleared before it runs again. The File, its Turns and its
-# Table Extractions stay: a retry is the same Document, not a new one.
+# Turns and Table Extractions stay: a retry is the same Document
 RESET_INGEST = [
     "MATCH (n:Chunk {file_id: $id}) DETACH DELETE n",
     "MATCH (n:DocTable {file_id: $id}) DETACH DELETE n",
@@ -237,7 +223,6 @@ def list_turns(file_id: str) -> list[dict]:
 
 
 def recent_turns(file_id: str, n: int) -> list[dict]:
-    """The last n complete turns, oldest first, as {question, answer}."""
     return graph().query(RECENT_TURNS, {"file_id": file_id, "n": n})
 
 
@@ -245,11 +230,7 @@ def save_turn(
     file_id: str, *, question: str, answer: str, citations: list[dict], mode: str, complete: bool,
     turn_id: str,
 ) -> None:
-    """Anchored on MATCH (f:File ...): if the document was deleted mid-answer this is a silent no-op
-    rather than an orphaned Turn. Citations are JSON-encoded because Neo4j properties cannot hold a
-    list of maps, and are stored denormalised (including chunk text) so history survives re-ingestion
-    or a chunk being deleted later. turn_id is minted by the streaming endpoint, which sends it in the
-    SSE "done" event."""
+    # Citations keep their chunk text, so history survives a re-ingest
     graph().query(SAVE_TURN, {
         "id": turn_id, "file_id": file_id, "question": question, "answer": answer,
         "citations": json.dumps(citations), "mode": mode, "complete": complete,
@@ -263,29 +244,23 @@ def clear_turns(file_id: str) -> None:
 def list_chunks(file_id: str, limit: int | None = None) -> list[dict]:
     statement, params = (ALL_CHUNKS, {}) if limit is None else (FIRST_CHUNKS, {"limit": limit})
     rows = graph().query(statement, {"file_id": file_id, **params})
-    # A chunk written before Highlights shipped has no regions property -- Neo4j returns None for it,
-    # which means "no Highlight" the same way an empty list does.
     return [{**row, "regions": json.loads(row.get("regions") or "[]")} for row in rows]
 
 
 def list_doc_tables(file_id: str) -> list[dict]:
-    """The tables Docling recognised in the document, whole. None for a document ingested before they
-    were kept, which a Table Extraction then reads from its chunks' text alone."""
     rows = graph().query(DOC_TABLES, {"file_id": file_id})
     return [{**row, "regions": json.loads(row["regions"])} for row in rows]
 
 
 def _table_extraction(row: dict) -> dict:
     rows = json.loads(row.get("rows") or "[]")
-    # Runs saved before rows had ids get their position as one; the first row deleted from such a
-    # run writes the list back, which is what makes those ids stick from then on.
+    # Rows saved before ids existed get their position
     for i, r in enumerate(rows):
         r.setdefault("id", str(i))
     return {**row, "columns": json.loads(row["columns"]), "rows": rows}
 
 
 def create_table_extraction(file_id: str, request: str, columns: list[dict], read_all: bool = False) -> dict:
-    """Anchored on MATCH (f:File ...), so a document deleted first leaves no orphaned TableExtraction."""
     extraction_id = str(uuid.uuid4())
     graph().query(CREATE_TABLE_EXTRACTION, {
         "id": extraction_id, "file_id": file_id, "request": request, "columns": json.dumps(columns),

@@ -1,4 +1,4 @@
-"""Unit tests for app.graph.to_citations. No Neo4j or LLM needed."""
+"""app.graph.to_citations."""
 from app.graph import to_citations
 
 

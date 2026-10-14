@@ -47,7 +47,6 @@ export function DocumentScreen({ docId }: { docId: string }) {
 
   const retryMutation = useMutation({
     mutationFn: () => api.retryDocument(docId),
-    // The document is queued again, which puts its query back on the 2 s ingest poll
     onSuccess: (document) => {
       queryClient.setQueryData(['document', docId], document);
       queryClient.invalidateQueries({ queryKey: ['documents'] });
@@ -88,7 +87,6 @@ export function DocumentScreen({ docId }: { docId: string }) {
 
         {doc?.status === 'done' && (
           <div className="segmented" role="tablist">
-            {/* Outline and Graph only exist for a long Document; Chat and Table work for both modes. */}
             {(doc.mode === 'long' ? (['chat', 'outline', 'graph', 'table'] as const) : (['chat', 'table'] as const)).map((key) => (
               <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
                 {t[TAB_LABEL[key]]}

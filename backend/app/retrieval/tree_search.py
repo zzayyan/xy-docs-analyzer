@@ -41,16 +41,13 @@ def outline_line(section: dict) -> str:
 
 
 def search(file_id: str, question: str, limit: int = 12, model: str | None = None) -> list[dict]:
-    """Reasoning-based retrieval: the LLM reads the section outline and picks sections, no embeddings involved.
-
-    question may hold several questions, one per line (a compound question split by graph.contextualize):
-    the outline is read once for all of them, and each gets up to MAX_SECTIONS sections."""
+    """The LLM picks sections from the outline. question may hold several questions, one per line."""
     questions = [q for q in question.splitlines() if q.strip()] or [question]
     sections = graph().query(SECTIONS_QUERY, {"file_id": file_id})
     if not sections:
         return []
 
-    # ponytail: whole outline goes into one prompt; for very large trees show only levels <= 2 first, then drill down
+    # ponytail: whole outline in one prompt; for huge trees show levels <= 2 first, then drill down
     outline = "\n".join(outline_line(s) for s in sections)
     choice = llm(model).with_structured_output(SectionChoice).invoke([
         ("system", SYSTEM_PROMPT),

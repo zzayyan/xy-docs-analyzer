@@ -1,5 +1,4 @@
-"""Sign-in and the session cookie. The HTTP tests fake the user store; the last test runs the real Cypher
-and needs Neo4j (docker compose up -d), like test_smoke.py."""
+"""Sign-in and the session cookie. The last test runs real Cypher and needs Neo4j."""
 import uuid
 
 import pytest

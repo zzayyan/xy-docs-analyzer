@@ -1,5 +1,4 @@
-"""GET /documents/{doc_id}/original/pages/{page_no}: a rendered PNG for the citation panel's Highlight
-view. The store is faked, so no Neo4j or LLM needed (prior art: test_originals.py)."""
+"""GET /documents/{doc_id}/original/pages/{page_no}. Store faked."""
 import pytest
 from fastapi.testclient import TestClient
 

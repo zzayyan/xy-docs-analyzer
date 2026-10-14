@@ -50,7 +50,7 @@ class QuestionEntities(BaseModel):
 def search(
     file_id: str, question: str, k: int = 6, triple_limit: int = 30, model: str | None = None
 ) -> tuple[list[str], list[dict]]:
-    """Return (graph facts as text lines, chunks that mention the matched entities)."""
+    """(graph facts as text lines, chunks mentioning the matched entities)."""
     extracted = llm(model).with_structured_output(QuestionEntities).invoke([("system", SYSTEM_PROMPT), ("human", question)])
     # Lowercased so an uppercase AND/OR/NOT inside a name is a word, not a Lucene operator
     names = [name for name in (LUCENE_SPECIAL.sub(" ", n).strip().lower() for n in extracted.names) if name]

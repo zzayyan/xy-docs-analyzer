@@ -1,5 +1,4 @@
-"""Regions are JSON-encoded on the Chunk node, the same reason Turn.citations and TableExtraction's
-columns/rows are (a Neo4j property can't hold a list of maps). No real Neo4j needed."""
+"""Regions are JSON-encoded on the Chunk node. Neo4j faked."""
 import json
 
 import pytest
@@ -51,8 +50,6 @@ def test_contexts_decodes_regions_and_tags_the_source():
 
 
 def test_ingest_writes_each_chunks_regions_to_neo4j_as_json(monkeypatch):
-    """Conversion output faked: whatever regions convert() hands back reach the Chunk node, encoded,
-    and a chunk with none is written as an empty list rather than skipped."""
     import app.ingest.pipeline as pipeline
 
     written: list[tuple[str, dict]] = []

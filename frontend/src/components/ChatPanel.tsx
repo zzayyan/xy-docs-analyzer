@@ -21,17 +21,15 @@ const STATUS_NODE_KEY = {
 interface Selected {
   key: string;
   citation: Citation;
-  /** The answer's other citations, to step through in the document viewer */
   citations: Citation[];
-  /** Opened by "follow sources" while the answer streams, not by the user: its highlight pulses */
+  /** Opened by "follow sources", not the user: its highlight pulses */
   auto?: boolean;
 }
 
-// Each followed source stays up at least this long, so "[1][2][3]" streamed in half a second does not flicker
+// Minimum time per followed source, so "[1][2][3]" streamed in half a second does not flicker
 const FOLLOW_DWELL_MS = 1200;
 
-/** The citations a streaming answer has used so far, in the order it first cited them. Graph facts have
- * no page to show, so they are not followed. */
+/** Citations in first-cited order. Graph facts have no page, so they are not followed. */
 function citedOrder(answer: string, citations: Citation[]): Citation[] {
   const byN = new Map(citations.filter((c) => c.source !== 'kg_facts').map((c) => [c.n, c]));
   const order: Citation[] = [];
@@ -44,7 +42,6 @@ function citedOrder(answer: string, citations: Citation[]): Citation[] {
   return order;
 }
 
-/** Short hint for a source chip: the deepest heading, else a page range. */
 function citationShortLabel(c: Citation): string {
   if (c.headings.length > 0) return c.headings[c.headings.length - 1];
   if (c.pages.length > 0) return c.pages.length === 1 ? `p. ${c.pages[0]}` : `p. ${c.pages[0]}-${c.pages[c.pages.length - 1]}`;
@@ -60,31 +57,23 @@ export function ChatPanel({ docId }: { docId: string }) {
   const [selected, setSelected] = useState<Selected | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  // "Follow sources": while an answer streams, the source panel moves to each source the moment the
-  // answer first cites it. followPref is the user's switch; following is whether this answer still
-  // follows -- any click on a source or the panel's close hands control back to the user.
+  // followPref is the user's switch; following ends for this answer once the user clicks a source or closes the panel
   const [followPref, setFollowPref] = useState(true);
   const [following, setFollowing] = useState(false);
   const [shownCount, setShownCount] = useState(0);
-  // The finished answer's citation order: an answer often streams in a few seconds while following it
-  // takes FOLLOW_DWELL_MS per source, so the follow carries on through it after the stream has ended
+  // Following outlasts the stream (FOLLOW_DWELL_MS per source), so the finished answer's citations are kept
   const [finishedCited, setFinishedCited] = useState<Citation[]>([]);
-  // ...and all its citations, for the document viewer to step through once the stream state is gone
   const [finishedCitations, setFinishedCitations] = useState<Citation[]>([]);
   const lastShownAt = useRef(0);
 
   const [modelOverride, setModelOverride] = useState<string | null>(null);
-  // Shares DocumentScreen.tsx's exact query key, so this reads from cache instead of firing a
-  // second request for the same document.
   const documentQuery = useQuery({ queryKey: ['document', docId], queryFn: () => api.getDocument(docId) });
   const modelsQuery = useQuery({ queryKey: ['models'], queryFn: api.models });
   const model = modelOverride ?? documentQuery.data?.llm_model ?? modelsQuery.data?.default ?? null;
 
   const turnsQuery = useQuery({ queryKey: ['turns', docId], queryFn: () => api.listTurns(docId) });
-  // The backend persists a Turn on success, failure and mid-stream disconnect alike, so every
-  // terminal path refetches history, then drops the optimistic question once the real one is in.
-  // Also refetches the document: a switched model is persisted server-side on the same request,
-  // so this is what picks that up into documentQuery.data.llm_model (and DocumentScreen's header).
+  // The backend saves a Turn on every terminal path, so each refetches history. Refetching the document
+  // picks up a model switched on the same request.
   const settle = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['turns', docId] }),
@@ -127,7 +116,7 @@ export function ChatPanel({ docId }: { docId: string }) {
     if (!question || streaming) return;
     setDraft('');
     setPendingQuestion(question);
-    // Not on a narrow screen, where the source panel covers the conversation it would be following
+    // Not on narrow screens, where the source panel covers the conversation
     const follow = followPref && !window.matchMedia('(max-width: 767px)').matches;
     setFollowing(follow);
     setShownCount(0);
@@ -150,8 +139,7 @@ export function ChatPanel({ docId }: { docId: string }) {
     return () => clearTimeout(timer);
   }, [next, shownCount, nextSiblings]);
 
-  // A followed source should appear at once, so every cited page is fetched as soon as the sources are
-  // known; page images are cached immutable, so the jump later is served from cache.
+  // Prefetch cited pages so a followed source appears at once
   const doc = documentQuery.data;
   const isPdf = !!doc?.has_original && doc.name.toLowerCase().endsWith('.pdf');
   useEffect(() => {
@@ -361,11 +349,9 @@ function TurnView({ turn, selectedKey, onSelect }: SourceSelection & { turn: Tur
 
 function LiveAnswer({ state, selectedKey, onSelect }: SourceSelection & { state: StreamState }) {
   const { t } = useLang();
-  // Between "done" and the refetched turn arriving, the stream is already idle: render nothing
-  // rather than flashing the "thinking" line again.
+  // Between "done" and the refetched turn, render nothing rather than flash "thinking" again
   if (state.status === 'idle') return null;
   if (!state.answer && state.citations.length > 0) {
-    // Retrieval is done and the answer has not started: show what was found, as it was found
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <span className="pulse" style={{ color: 'var(--text-muted)' }}>

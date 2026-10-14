@@ -25,15 +25,9 @@ const listStyle = {
   gap: 4,
 } as const;
 
-/** LLM answers are markdown (headings, bold, numbered lists) with [n] citation markers inline
- * -- rendering them as plain text left every ** and * visible verbatim. Turning [n] into a real
- * markdown link (cite:n) lets react-markdown's own parser carry the marker through unharmed
- * (it's a standalone token, never inside a bold span in practice), then the `a` override below
- * intercepts that one URL scheme to render a clickable citation pill instead of a normal link;
- * anything else falls through to a real external link. */
+/** Markdown with [n] markers turned into cite:n links, which the `a` override renders as citation pills. */
 export function MessageBody({ text, citations, onCitationClick }: MessageBodyProps) {
-  // A grouped marker becomes one link per citation, so "[4, 5]" renders as two pills. Only when every
-  // number is a real citation: "[2021-2023]" in the answer's text is a year span and stays as written.
+  // "[4, 5]" becomes two pills, but only when every number is a real citation: "[2021-2023]" stays text
   const known = new Set(citations.map((c) => c.n));
   const withCitationLinks = text.replace(CITE_GROUP, (match, group: string) => {
     const numbers = citeNumbers(group);
@@ -119,8 +113,7 @@ export function MessageBody({ text, citations, onCitationClick }: MessageBodyPro
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, color: 'var(--text-title)', lineHeight: 1.65 }}>
-      {/* defaultUrlTransform blanks any non-http(s)/mailto scheme, which silently turned every
-          cite:n href into "" and every marker into a plain link. Let only cite: through. */}
+      {/* defaultUrlTransform blanks unknown schemes, cite: included */}
       <Markdown components={components} urlTransform={(url) => (url.startsWith(CITE_PREFIX) ? url : defaultUrlTransform(url))}>
         {withCitationLinks}
       </Markdown>

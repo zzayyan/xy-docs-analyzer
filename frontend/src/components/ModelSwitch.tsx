@@ -7,11 +7,7 @@ interface ModelSwitchProps {
   choices: string[];
 }
 
-/** Which model answers questions for the document currently open, changeable anytime. A native
- * <select>'s closed state can be token-styled, but its open option list is drawn by the OS and
- * ignores CSS entirely -- so this is a small custom trigger+listbox instead, following the same
- * open/close/Escape pattern already used in SourcePanel.tsx. There is no Select in the pulled
- * design-system subset (see design-system/README.md) to reach for instead. */
+/** Custom listbox, not <select>: the OS draws <select>'s open list and ignores CSS. */
 export function ModelSwitch({ value, onChange, choices }: ModelSwitchProps) {
   const { t } = useLang();
   const [open, setOpen] = useState(false);

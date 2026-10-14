@@ -1,5 +1,4 @@
-"""Model endpoints an admin sets in Settings. Saved values live on Meta nodes and replace the .env values
-(the defaults) for every field they hold; saving applies them to the live `settings` at once, no restart."""
+"""Model endpoints saved from Settings, on Meta nodes. They override .env and apply live, no restart."""
 from langchain_neo4j import Neo4jGraph
 
 from app import models
@@ -8,7 +7,6 @@ from app.db import graph
 
 # Saved apart, so resetting the chat models to .env never changes what the stored vectors were embedded with
 GROUPS = {
-    # The chat model (ingest, answers, the knowledge graph) and Table Extraction's own model
     "models": (
         "llm_provider", "llm_base_url", "llm_api_key", "llm_model", "llm_model_choices", "llm_reasoning_effort",
         "table_llm_base_url", "table_llm_api_key", "table_llm_model",
@@ -34,7 +32,7 @@ def saved(group: str, g: Neo4jGraph | None = None) -> dict:
 
 
 def apply(overrides: dict) -> None:
-    # ponytail: applied in this process only, so one uvicorn worker; with several, each would need to reload
+    # ponytail: this process only, so one uvicorn worker; with several, each would need to reload
     for field in FIELDS:
         setattr(settings, field, overrides.get(field, ENV[field]))
     # Neo4j stores no nulls, so "no reasoning_effort" is saved as ""
@@ -45,8 +43,7 @@ def apply(overrides: dict) -> None:
 
 
 def load(g: Neo4jGraph | None = None) -> None:
-    """What was saved in Settings wins over .env. Run by app/db.py's graph() before the embedding check, so
-    the check compares the stored vectors with the embedding model actually in use."""
+    # db.graph() runs this before the embedding check, so the check sees the model actually in use
     apply({field: value for group in GROUPS for field, value in saved(group, g).items()})
 
 
@@ -68,5 +65,4 @@ def reset(group: str) -> None:
 
 
 def masked(secret: str) -> str:
-    """Enough of a key to recognise it, never enough to use it."""
     return f"{MASK}{secret[-4:]}" if len(secret) > 8 else (MASK if secret else "")

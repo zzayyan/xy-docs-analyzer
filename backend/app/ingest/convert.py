@@ -30,9 +30,7 @@ def converter(ocr: bool = True) -> DocumentConverter:
 
 
 def has_text_layer(path: str) -> bool:
-    """Whether the PDF carries its own text, sampled across the document."""
-    # PDFium is not thread-safe: every call shares Docling's own lock, since a conversion or a page
-    # render can be running on another thread. Never held around a Docling convert(), which takes it.
+    # PDFium is not thread-safe, so share Docling's lock. Never hold it around convert(), which takes it.
     with pypdfium2_lock:
         pdf = pypdfium2.PdfDocument(path)
         try:
@@ -45,7 +43,6 @@ def has_text_layer(path: str) -> bool:
 
 @lru_cache
 def tokenizer() -> HuggingFaceTokenizer:
-    # Same tokenizer as the embedding model, so chunk sizes match what bge-m3 sees
     return HuggingFaceTokenizer(
         tokenizer=AutoTokenizer.from_pretrained(settings.tokenizer_model),
         max_tokens=settings.chunk_max_tokens,
@@ -53,7 +50,6 @@ def tokenizer() -> HuggingFaceTokenizer:
 
 
 def page_count(path: str) -> int:
-    """Pages in a PDF, cheap enough to run before deciding whether to ingest it at all."""
     with pypdfium2_lock:
         pdf = pypdfium2.PdfDocument(path)
         try:
@@ -62,11 +58,10 @@ def page_count(path: str) -> int:
             pdf.close()
 
 
-RENDER_SCALE = 2  # ~144 DPI: legible for a Highlight, small enough to ship over the wire
+RENDER_SCALE = 2  # ~144 DPI
 
 
 def render_page(path: str, page_no: int, scale: float = RENDER_SCALE) -> bytes | None:
-    """A PDF page as a PNG, for the citation panel's Highlight view. None for a page out of range."""
     with pypdfium2_lock:
         pdf = pypdfium2.PdfDocument(path)
         try:
@@ -80,11 +75,7 @@ def render_page(path: str, page_no: int, scale: float = RENDER_SCALE) -> bytes |
 
 
 def regions_of(doc_items, pages: dict[int, PageItem]) -> list[dict]:
-    """One region per (item, provenance) pair: a Highlight's bounding box, top-left origin, in PDF
-    points, with the page's own size attached so the frontend can scale without a second lookup.
-
-    docling_core's to_top_left_origin() does not guarantee t <= b afterwards (its own `.height` uses
-    abs() for exactly this reason) -- normalised here once, so nothing downstream has to re-sort."""
+    """Highlight boxes, top-left origin in PDF points, each with its page size for scaling."""
     regions = []
     for item in doc_items:
         for prov in item.prov:
@@ -92,6 +83,7 @@ def regions_of(doc_items, pages: dict[int, PageItem]) -> list[dict]:
             if page is None:
                 continue
             box = prov.bbox.to_top_left_origin(page.size.height)
+            # to_top_left_origin() does not guarantee t <= b
             top, bottom = sorted((box.t, box.b))
             regions.append({
                 "page": prov.page_no, "l": box.l, "t": top, "r": box.r, "b": bottom,
@@ -103,32 +95,26 @@ def regions_of(doc_items, pages: dict[int, PageItem]) -> list[dict]:
 def convert_document(path: str, on_progress: Callable[[int, int], None] | None = None) -> DoclingDocument:
     if Path(path).suffix.lower() != ".pdf":
         return converter().convert(path).document
-    # Docling's memory keeps growing within one convert() call: 25 pages peak at ~14 GB, 100 pages exhausted
-    # Windows commit memory and killed the API worker with an access violation. Batches start at page 1 and
-    # stay contiguous so concatenate() keeps absolute page numbers.
-    # ponytail: a batch whose first page fails to convert shifts later page numbers by one in the merged doc
+    # Docling memory grows within one convert(): 25 pages peak at ~14 GB, 100 pages killed the worker.
+    # Contiguous batches from page 1 keep absolute page numbers through concatenate().
+    # ponytail: a batch whose first page fails to convert shifts later page numbers by one
     total = page_count(path)
-    # OCR on a born-digital PDF costs ~70% more time and added 8 characters across 60 measured pages
+    # OCR on a born-digital PDF costs ~70% more time for no gain
     pdf_converter = converter(ocr=not has_text_layer(path))
     docs = []
     for start in range(1, total + 1, PDF_BATCH_PAGES):
         end = min(start + PDF_BATCH_PAGES - 1, total)
         docs.append(pdf_converter.convert(path, page_range=(start, end)).document)
-        # Conversion is the longest stage by far, so report pages as each batch lands
         if on_progress:
             on_progress(end, total)
     return DoclingDocument.concatenate(docs)
 
 
 def document_tables(doc: DoclingDocument) -> dict[str, dict]:
-    """Every table Docling recognised, by its self_ref, whole and as Markdown: what a Table Extraction
-    reads instead of the triplet text ("row, column = value") the chunker flattens it into, which also
-    splits one large table across several chunks, mid-row (see docs/adr/0005). A table with no
-    Markdown is left out, so its chunks keep its triplet text."""
+    """Every table whole, as Markdown, by self_ref (docs/adr/0005)."""
     tables = {}
     for idx, item in enumerate(doc.tables):
-        # The export puts the caption above the table (kept apart below), and pads every cell to its column's
-        # widest, which costs tokens on every row of every read
+        # Drop the caption line (kept apart) and the column padding, which costs tokens on every read
         exported = item.export_to_markdown(doc).splitlines()
         lines = [" ".join(line.split()) for line in exported if line.lstrip().startswith("|")]
         markdown = "\n".join(re.sub(r"-{3,}", "---", line) if SEPARATOR.fullmatch(line) else line for line in lines)
@@ -138,20 +124,18 @@ def document_tables(doc: DoclingDocument) -> dict[str, dict]:
             "idx": idx, "markdown": markdown, "caption": item.caption_text(doc),
             "pages": sorted({prov.page_no for prov in item.prov}),
             "regions": regions_of([item], doc.pages),
-            # The items a table owns besides itself: read as part of the table, so never as prose too
+            # Read with the table, so never as prose too
             "owns": {ref.cref for ref in [*item.captions, *item.footnotes, *item.children]},
         }
     return tables
 
 
 def prose_of(chunk, tables: dict[str, dict], chunker: HybridChunker, doc: DoclingDocument) -> str:
-    """A chunk's text without the tables in it: its headings and its other items, serialized the way
-    the chunker serializes one item of a chunk it splits. The chunk's doc_items are plain DocItem copies,
-    so each is resolved against the document first to be serialized as what it is.
+    """A chunk's text without its tables. doc_items are plain DocItem copies, so each is resolved
+    against the document to serialize as what it is.
 
-    ponytail: a paragraph too long for one chunk is split into segments that share the whole paragraph
-    as their doc_item, so a segment merged into a chunk with a table gives back the whole paragraph here;
-    its rows then come twice and the merge pass has to fold them. Slice the segment out if that bites."""
+    ponytail: a split paragraph's segments all point at the whole paragraph, so it may come back whole
+    and its rows twice (the merge pass folds them); slice the segment out if that bites."""
     owned = set(tables)
     for ref in (d.self_ref for d in chunk.meta.doc_items if d.self_ref in tables):
         owned |= tables[ref]["owns"]
@@ -169,7 +153,6 @@ def prose_of(chunk, tables: dict[str, dict], chunker: HybridChunker, doc: Doclin
 def convert(
     path: str, on_progress: Callable[[int, int], None] | None = None,
 ) -> tuple[DoclingDocument, int, list[dict], list[dict]]:
-    """Convert a file and return (document, total token count, chunks, tables)."""
     doc = convert_document(path, on_progress)
     tokens = tokenizer().count_tokens(doc.export_to_markdown())
     tables = document_tables(doc)
@@ -181,15 +164,12 @@ def convert(
         table_refs = list(dict.fromkeys(d.self_ref for d in chunk.meta.doc_items if d.self_ref in tables))
         chunks.append({
             "idx": idx,
-            # contextualize() prepends headings, which helps both embedding and answering
+            # Prepends headings, which helps both embedding and answering
             "text": chunker.contextualize(chunk=chunk),
             "pages": pages,
             "headings": chunk.meta.headings or [],
-            # Not derived from `pages` above: an independent read of the same provenance, so a
-            # doc.pages miss inside regions_of can never change the existing pages/headings behaviour.
             "regions": regions_of(chunk.meta.doc_items, doc.pages),
             "table_refs": [tables[ref]["idx"] for ref in table_refs],
-            # Only on a chunk that holds a table: what is left to read once its tables are read whole
             "prose": prose_of(chunk, tables, chunker, doc) if table_refs else None,
         })
     return doc, tokens, chunks, [{k: v for k, v in t.items() if k != "owns"} for t in tables.values()]

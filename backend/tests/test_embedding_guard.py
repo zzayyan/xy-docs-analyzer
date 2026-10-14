@@ -1,4 +1,4 @@
-"""Unit tests for the embedding-model guard in app.db. No Neo4j needed."""
+"""The embedding-model guard in app.db. Neo4j faked."""
 import pytest
 
 from app.config import settings

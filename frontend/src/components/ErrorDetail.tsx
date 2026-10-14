@@ -1,9 +1,7 @@
 import { useState } from 'react';
 import { useLang } from '../lib/i18n';
 
-/** Ingest errors are the raw str() of a caught exception (see backend/app/ingest/pipeline.py),
- * which for a provider error can be a several-hundred-character Python dict repr. Shown in full
- * it dominates whatever it's next to (a table row, an Alert) — collapse it behind a toggle. */
+/** Raw exception text can be a long Python dict repr; collapse it behind a toggle. */
 export function ErrorDetail({ message, limit = 120 }: { message: string; limit?: number }) {
   const { t } = useLang();
   const [expanded, setExpanded] = useState(false);

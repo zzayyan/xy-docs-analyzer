@@ -21,8 +21,6 @@ function isRunning(extraction: TableExtraction): boolean {
   return extraction.status === 'queued' || extraction.status === 'running';
 }
 
-/** Table Extraction for one document: describe the table, edit the proposed columns, run it over
- * every chunk, then read the rows with their citations. Earlier extractions stay openable. */
 export function TablePanel({ docId }: { docId: string }) {
   const { t, lang } = useLang();
   const queryClient = useQueryClient();
@@ -34,8 +32,7 @@ export function TablePanel({ docId }: { docId: string }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const listQuery = useQuery({ queryKey: ['tables', docId], queryFn: () => api.listTables(docId) });
-  // A run outlives this tab, so the open extraction is polled from the server rather than kept in
-  // component state; the interval stops as soon as it reaches a terminal status.
+  // A run outlives this tab, so it is polled from the server until it reaches a terminal status
   const openQuery = useQuery({
     queryKey: ['table', docId, openId],
     queryFn: () => api.getTable(docId, openId as string),
@@ -66,7 +63,6 @@ export function TablePanel({ docId }: { docId: string }) {
     onError: fail,
   });
 
-  // The same table again over every chunk, for a scoped run that read too little (docs/adr/0004)
   const readAllMutation = useMutation({
     mutationFn: (extraction: TableExtraction) => api.createTable(docId, extraction.request, extraction.columns, true),
     onSuccess: (created) => {
@@ -98,14 +94,12 @@ export function TablePanel({ docId }: { docId: string }) {
 
   const deleteRowMutation = useMutation({
     mutationFn: ({ tableId, rowId }: { tableId: string; rowId: string }) => api.deleteTableRow(docId, tableId, rowId),
-    // Refetch rather than patch the cache: the server's list is the one that persists
     onSuccess: (_, { tableId }) => queryClient.invalidateQueries({ queryKey: ['table', docId, tableId] }),
     onError: fail,
   });
 
   const open = openId !== null ? openQuery.data ?? null : null;
-  // The history list carries each run's status and is fetched once, so when the polled run reaches a
-  // terminal status, refresh the list that still shows it as running.
+  // The history list is fetched once, so refresh it when the polled run finishes
   const openStatus = open?.status ?? null;
   useEffect(() => {
     if (openStatus === 'done' || openStatus === 'error' || openStatus === 'cancelled') {
@@ -315,8 +309,6 @@ function ColumnEditor({ columns, onChange, onRun, running }: ColumnEditorProps) 
   );
 }
 
-/** How far a run has got: the chunk count it reads, plus elapsed and estimated remaining time, the
- * same shape ingest shows — a run is minutes long, so a bare percentage says too little. */
 function RunProgress({
   extraction,
   onCancel,
@@ -358,7 +350,6 @@ function RunProgress({
 interface ExtractionViewProps {
   extraction: TableExtraction;
   selectedKey: string | null;
-  /** citations: the row's own, which the document viewer steps through */
   onSelect: (key: string, citation: Citation, citations: Citation[]) => void;
   onStartOver: () => void;
   onNew: () => void;
@@ -474,8 +465,7 @@ function ExtractionView({
                 { key: 'sources', label: t.tableCitationsLabel },
               ]}
               rows={extraction.rows.map((row, rowIndex) => ({
-                // Keyed by position, not by column name: a column the user named "sources" would
-                // otherwise collide with the citations column.
+                // By position: a column named "sources" would collide with the citations column
                 ...Object.fromEntries(names.map((name, index) => [`c${index}`, row.values[name] ?? ''])),
                 sources: (
                   <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>

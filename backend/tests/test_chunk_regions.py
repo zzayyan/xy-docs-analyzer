@@ -1,5 +1,4 @@
-"""regions_of() turns Docling provenance into flat, top-left, page-sized region dicts. Pure function,
-faked with SimpleNamespace like test_convert_progress.py fakes the converter -- no real Docling models."""
+"""regions_of() over Docling provenance faked with SimpleNamespace."""
 from types import SimpleNamespace
 
 from docling_core.types.doc.base import BoundingBox, CoordOrigin
@@ -27,7 +26,7 @@ def test_a_bottom_left_box_becomes_top_left_with_the_page_size_attached():
 
 
 def test_top_and_bottom_are_normalised_so_top_never_exceeds_bottom():
-    # The library's own to_top_left_origin does not guarantee t <= b -- callers must not have to sort it
+    # to_top_left_origin does not guarantee t <= b
     regions = regions_of([item(prov(1, l=0, t=20, r=10, b=70))], {1: page(100, 100)})
 
     [region] = regions

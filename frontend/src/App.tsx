@@ -20,8 +20,6 @@ function initialRailCollapsed(): boolean {
   }
 }
 
-// One workspace instead of a list page and a detail page: the rail keeps every document one
-// click away while a document is open. Routes are unchanged (#/ and #/doc/{id}).
 function App() {
   const { t } = useLang();
   const queryClient = useQueryClient();
@@ -30,7 +28,7 @@ function App() {
   const settingsPage = route.match(/^\/settings(?:\/(\w+))?$/);
   const [toast, setToast] = useState<string | null>(null);
   const [railCollapsed, setRailCollapsed] = useState(initialRailCollapsed);
-  // null: signed out. Set by LoginScreen on success and by main.tsx on any 401.
+  // null: signed out. main.tsx resets it on any 401.
   const meQuery = useQuery({
     queryKey: ['me'],
     queryFn: () => api.me().catch((e) => (e instanceof ApiError && e.status === 401 ? null : Promise.reject(e))),
@@ -44,7 +42,6 @@ function App() {
     try {
       localStorage.setItem(RAIL_KEY, next ? '1' : '0');
     } catch {
-      // best-effort persistence only
     }
   };
 

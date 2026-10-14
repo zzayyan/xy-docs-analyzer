@@ -31,7 +31,6 @@ export function DocumentRail({ activeId, onUpload, uploading, onToggle, user, on
 
   return (
     <aside className="rail" data-drop={drop.active} {...drop.handlers}>
-      {/* Shown instead of everything else while the rail is collapsed (CSS, desktop only) */}
       <div className="rail-strip">
         <button className="quiet-button rail-toggle" onClick={onToggle} aria-label={t.railExpand} title={t.railExpand}>
           <PanelIcon />

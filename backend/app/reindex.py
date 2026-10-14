@@ -1,9 +1,5 @@
-"""Switching the embedding model once vectors are stored. Vectors from two models are not comparable, so
-every chunk is embedded again from its stored text: no conversion and no LLM call, unlike a re-ingest.
-
-The new vectors go to embedding_next first and replace the old ones in one statement at the end, together
-with the marker and the saved settings, so search keeps working on the old model the whole time and a
-failed run changes nothing."""
+"""Re-embeds every chunk for a new embedding model. New vectors land in embedding_next and swap in with
+one statement at the end, so search keeps the old model meanwhile and a failed run changes nothing."""
 import threading
 
 from app import model_settings
@@ -20,8 +16,7 @@ SWAP = "MATCH (c:Chunk) WHERE c.embedding_next IS NOT NULL SET c.embedding = c.e
 CLEAR_NEXT = "MATCH (c:Chunk) WHERE c.embedding_next IS NOT NULL REMOVE c.embedding_next"
 IN_FLIGHT = "MATCH (f:File) WHERE NOT f.status IN ['done', 'error'] RETURN count(f) AS n"
 
-# ponytail: progress lives in this process only; a restart mid-run leaves the old vectors in use and the
-# run is simply started again (its leftover embedding_next values are cleared first)
+# ponytail: progress is in-process; a restart mid-run keeps the old vectors and the run starts over
 STATE = {"status": "idle", "done": 0, "total": 0, "error": None}
 LOCK = threading.Lock()
 
@@ -48,13 +43,12 @@ def set_marker(values: dict) -> None:
 
 
 def probe(values: dict) -> int:
-    """The dimension the endpoint really returns, so a wrong EMBED_DIM is caught before any chunk is read."""
     client = embedding_model(values["embed_provider"], values["embed_base_url"], values["embed_api_key"], values["embed_model"])
     return len(client.embed_query("dimension check"))
 
 
 def start(values: dict) -> bool:
-    """Marks a run as started, or False when one already is. The caller runs run() in the background."""
+    """False when a run is already going."""
     with LOCK:
         if running():
             return False

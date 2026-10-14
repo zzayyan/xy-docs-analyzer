@@ -11,15 +11,12 @@ from app.ingest.kg import extract_graph
 from app.ingest.tree import build_tree
 from app.models import embeddings, llm
 
-# Docling peaks at ~14 GB converting one 25-page batch (see convert_document), so two conversions at
-# once can exhaust memory and kill the worker. Only conversion is serialized; embedding, summaries and
-# graph extraction are HTTP calls and overlap freely.
-# ponytail: one global lock, so a queued upload waits for the whole conversion ahead of it; a bounded
-# semaphore sized to RAM if several must convert at once.
+# Docling peaks at ~14 GB per batch, so two conversions at once can kill the worker. Only conversion is
+# serialized; the LLM and embedding stages overlap freely.
+# ponytail: one global lock; a bounded semaphore sized to RAM if several must convert at once
 CONVERT_LOCK = threading.Lock()
 
 
-# Enough text to tell a language apart, small enough for one cheap call
 LANGUAGE_SAMPLE_CHARS = 2000
 
 LANGUAGE_SYSTEM = (
@@ -33,8 +30,7 @@ class DocumentLanguage(BaseModel):
 
 
 def detect_language(chunks: list[dict]) -> str | None:
-    """The Document Language, from the opening of its text. None when the call fails or says nothing:
-    a document without one is asked exactly as before, which is better than failing its ingest."""
+    """None on failure: a missing language is better than a failed ingest."""
     sample = "\n\n".join(c["text"] for c in chunks)[:LANGUAGE_SAMPLE_CHARS]
     if not sample.strip():
         return None
@@ -46,11 +42,11 @@ def detect_language(chunks: list[dict]) -> str | None:
 
 
 class Deleted(Exception):
-    """The Document was deleted while its ingest was still running: nothing left to write to."""
+    """The Document was deleted mid-ingest."""
 
 
 def set_status(file_id: str, **props) -> bool:
-    """False when the File no longer exists, i.e. its Document was deleted."""
+    """False when the File no longer exists."""
     rows = graph().query(
         "MATCH (f:File {id: $id}) SET f += $props, f.updated_at = timestamp() RETURN count(f) AS n",
         {"id": file_id, "props": props},
@@ -59,8 +55,7 @@ def set_status(file_id: str, **props) -> bool:
 
 
 def step(file_id: str, **props) -> None:
-    """set_status for ingest's own progress: stops the ingest once the Document is gone, instead of
-    spending minutes of LLM calls on writes that would all match nothing."""
+    """set_status that stops the ingest once the Document is gone."""
     if not set_status(file_id, **props):
         raise Deleted()
 
@@ -83,12 +78,10 @@ def progress_between(file_id: str, start: float, end: float):
 
 def ingest(file_id: str, path: str) -> None:
     try:
-        # Stays "queued" until this upload's turn to convert comes
         with CONVERT_LOCK:
             step(file_id, status="converting", progress=0.05, step_done=0, step_total=0)
             doc, tokens, chunks, tables = convert(path, on_progress=progress_between(file_id, 0.05, 0.3))
         mode = "long" if tokens > settings.long_doc_tokens else "short"
-        # embedding is one call for every chunk at once, so it has no sub-progress of its own
         step(
             file_id, tokens=tokens, mode=mode, chunks=len(chunks), language=detect_language(chunks),
             status="embedding", progress=0.3, step_done=0, step_total=0,
@@ -97,7 +90,7 @@ def ingest(file_id: str, path: str) -> None:
         vectors = embeddings().embed_documents([c["text"] for c in chunks])
         rows = [{
             **c, "id": f"{file_id}:{c['idx']}", "embedding": v,
-            # A Neo4j property can't hold a list of maps, the same reason Turn.citations is JSON too
+            # A Neo4j property cannot hold a list of maps
             "regions": json.dumps(c["regions"]),
             "table_ids": [f"{file_id}:t{i}" for i in c.get("table_refs") or []],
         } for c, v in zip(chunks, vectors)]
@@ -132,12 +125,11 @@ def ingest(file_id: str, path: str) -> None:
             build_tree(file_id, doc, rows, on_progress=progress_between(file_id, 0.35, 0.6))
             step(file_id, status="extracting_graph", progress=0.6, step_done=0, step_total=0)
             skipped = extract_graph(file_id, rows, on_progress=progress_between(file_id, 0.6, 0.95))
-            # Recorded, not silent: how many chunks have no graph because extraction kept failing on them
             step(file_id, graph_skipped=skipped)
 
         set_status(file_id, status="done", progress=1.0, step_done=0, step_total=0)
     except Deleted:
-        return  # the user deleted it: not an error, and nothing left to mark
+        return
     except Exception as exc:
         set_status(file_id, status="error", error=str(exc))
         raise

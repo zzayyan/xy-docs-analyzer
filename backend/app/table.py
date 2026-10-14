@@ -1,8 +1,4 @@
-"""Table Extraction: a user-described table pulled out of every chunk of one document, with the tables
-Docling recognised in it read whole (docs/adr/0005).
-
-Column proposal and the per-chunk read are both structured output over the document's own model
-(prior art: app/retrieval/kg.py). Persistence lives in app/store.py, orchestration in app/api.py."""
+"""Table Extraction: a user-described table pulled out of one document's chunks."""
 import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -12,38 +8,22 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.models import llm, table_llm
 
-# A chunk is at most CHUNK_MAX_TOKENS long, so its rows cannot honestly need more output than this.
-# The cap is what makes a runaway cost seconds instead of minutes (measured: 7s against 110s).
+# Caps a runaway repeat loop at seconds instead of minutes (measured: 7s against 110s)
 EXTRACT_MAX_TOKENS = 3000
-# A table is read whole instead of chunk by chunk (docs/adr/0005), in batches of this many rows with its
-# header repeated in each, so one table of hundreds of rows never becomes one prompt and one answer.
 TABLE_BATCH_ROWS = 40
-# A batch holds several chunks' worth of rows, and its answer can be nearly as long as the batch itself.
-# ponytail: double EXTRACT_MAX_TOKENS, not measured; size it from a real batch if a long table runs out.
+# ponytail: double EXTRACT_MAX_TOKENS, not measured; size it from a real batch if a long table runs out
 TABLE_EXTRACT_MAX_TOKENS = 2 * EXTRACT_MAX_TOKENS
-# Greedy decoding (temperature 0) repeats itself forever on some passages -- measured on Qwen3.5-4B,
-# where one chunk ran to 15968 tokens of repeated rows every time. 0.3 still ran away on 3 of 8 retries
-# of those chunks, which failed whole runs at random; 0.7 on none of 8 (see docs/adr/0001).
+# Greedy decoding loops forever on some passages; 0.3 still looped on 3 of 8 retries, 0.7 on none (docs/adr/0001)
 RETRY_TEMPERATURE = 0.7
-# The merge pass answers with row numbers only, so its output is small even for a long table.
 MERGE_MAX_TOKENS = 2000
-# The scope pass answers with part numbers only. Each part is a run of chunks under one heading, shown
-# as its heading plus how it begins; past SCOPE_MAX_PARTS the listing no longer fits a small model's
-# context, so the whole document is read instead.
-# ponytail: all-or-nothing past the cap; scope a long document section by section if that bites.
+# ponytail: past SCOPE_MAX_PARTS the whole document is read; scope section by section if that bites
 SCOPE_MAX_TOKENS = 1000
 SCOPE_MAX_PARTS = 200
 SCOPE_PREVIEW_CHARS = 120
-# Two values of one column describe the same thing when they share more than this share of their
-# words. Deliberately above one half: "menyerahkan laporan bulanan" and "menyerahkan laporan tahunan"
-# share exactly half and are different obligations, so a paraphrase that also shares only half
-# ("menyediakan" / "Disediakan tenaga ahli") is left unmerged too (see docs/adr/0002).
+# Above one half on purpose: "laporan bulanan" vs "laporan tahunan" share half and differ (docs/adr/0002)
 SAME_VALUE_OVERLAP = 0.6
 WORD = re.compile(r"\w+")
 
-# How much of the document is shown when proposing columns: enough to pick up its own wording,
-# small enough to prepend to a single call. Sections come from the outline, so only long documents
-# have them; the opening chunks are what a short document has instead.
 CONTEXT_SECTIONS = 40
 CONTEXT_SECTION_CHARS = 80
 CONTEXT_CHUNKS = 5
@@ -106,7 +86,7 @@ MERGE_SYSTEM = (
 
 
 class Stopped(Exception):
-    """Raised when a run is cancelled mid-way: an outcome the user asked for, not a failure."""
+    """The user cancelled the run."""
 
 
 class Column(BaseModel):
@@ -145,11 +125,7 @@ class ChunkRows(BaseModel):
 
 
 def document_context(sections: list[dict], chunks: list[dict]) -> str:
-    """A short, bounded picture of one document: its outline, then its opening chunks.
-
-    Every part is capped, so a document with hundreds of long headings cannot crowd out the request
-    this context is prepended to. Pure text assembly, so the callers holding the Neo4j rows decide
-    what to read."""
+    """Outline then opening chunks, every part capped so it cannot crowd out the request."""
     parts = []
     if sections:
         titles = "\n".join(f"- {s['title'][:CONTEXT_SECTION_CHARS]}" for s in sections[:CONTEXT_SECTIONS])
@@ -161,19 +137,14 @@ def document_context(sections: list[dict], chunks: list[dict]) -> str:
 
 
 def chat(model: str | None, **options):
-    """The model every table call goes to: TABLE_LLM_MODEL when configured, else the document's own.
-    options are llm()'s temperature and max_tokens."""
+    """TABLE_LLM_MODEL when configured, else the document's own model."""
     if settings.table_llm_model:
-        # The output caps above were measured on a model that answers directly. A table model that reasons
-        # first spends most of them thinking (Nemotron-3-Super: 2700 tokens on a 500-token chunk), so it
-        # gets its own, larger cap instead.
+        # The caps above assume a model that answers directly; a reasoning model spends them thinking
         return table_llm(**{**options, "max_tokens": settings.table_llm_max_tokens})
     return llm(model, **options)
 
 
 def propose_columns(request: str, model: str | None = None, context: str = "") -> list[dict]:
-    """context is the document the columns are for (see document_context); without it the model is
-    guessing names from the request's wording alone."""
     described = f"{context}\n\nRequest:\n{request}" if context else request
     proposed = chat(model).with_structured_output(ProposedColumns).invoke([
         ("system", PROPOSE_SYSTEM),
@@ -183,7 +154,6 @@ def propose_columns(request: str, model: str | None = None, context: str = "") -
 
 
 def suggest_tables(context: str, model: str | None = None) -> list[dict]:
-    """Tables worth extracting from this document, for a user who has not typed a request yet."""
     suggested = chat(model).with_structured_output(SuggestedTables).invoke([
         ("system", SUGGEST_SYSTEM),
         ("human", context),
@@ -202,7 +172,7 @@ def read_structured(schema: type[BaseModel], messages: list, model: str | None, 
 
 
 def parts_of(chunks: list[dict]) -> list[list[dict]]:
-    """Consecutive chunks under the same headings, in document order: the units scope() chooses between."""
+    """Consecutive chunks under the same headings."""
     parts: list[list[dict]] = []
     for chunk in chunks:
         if parts and (parts[-1][0].get("headings") or []) == (chunk.get("headings") or []):
@@ -213,19 +183,12 @@ def parts_of(chunks: list[dict]) -> list[list[dict]]:
 
 
 def part_titles(chunks: list[dict]) -> list[str]:
-    """The heading of every part these chunks make up, in document order, for showing what a run read."""
     return [" / ".join(part[0].get("headings") or []) or "-" for part in parts_of(chunks)]
 
 
 def scope(request: str, chunks: list[dict], model: str | None) -> list[dict]:
-    """The chunks a table has to be read from, chosen once with the whole document in view.
-
-    Each chunk is otherwise read on its own, and on its own a passage listing regulations as examples of
-    a website's catalogue looks exactly like one listing a law's legal basis (measured on a 46-chunk
-    document: 73 rows where 5 answered the request, on a 120B model as on a 4B one). Seeing every part's
-    heading side by side is what tells them apart. Anything short of a usable answer -- a failed call, no
-    valid part, too many parts to show -- reads the whole document: a table that reads too much is noisy,
-    one that reads too little silently misses rows (see docs/adr/0004)."""
+    """The chunks worth reading, chosen with every part's heading in view (docs/adr/0004). Any doubt
+    reads the whole document: too much is noisy, too little silently misses rows."""
     parts = parts_of(chunks)
     if len(parts) < 2 or len(parts) > SCOPE_MAX_PARTS:
         return chunks
@@ -234,8 +197,7 @@ def scope(request: str, chunks: list[dict], model: str | None) -> list[dict]:
         heading = " / ".join(part[0].get("headings") or []) or "(no heading)"
         opening = " ".join(part[0]["text"].split())
         opening = opening.removeprefix(" ".join(heading.split(" / ")).strip()).strip()
-        # A table can sit under a heading that says nothing about it (a results table placed in a methods
-        # appendix), and its caption is not in the part's opening: shown here, so it can still be chosen
+        # A table's heading may say nothing about it, so its caption is shown too
         captions = dict.fromkeys(t["caption"][:CONTEXT_SECTION_CHARS] for c in part for t in c.get("tables") or [] if t.get("caption"))
         tables = f" [tables: {'; '.join(captions)}]" if captions else ""
         lines.append(f"{i}. {heading[:CONTEXT_SECTION_CHARS]} -- {opening[:SCOPE_PREVIEW_CHARS]}{tables}")
@@ -251,11 +213,7 @@ def scope(request: str, chunks: list[dict], model: str | None) -> list[dict]:
 
 
 def extract_one(text: str, columns: list[dict], model: str | None, request: str) -> ChunkRows:
-    """One LLM call, no database access, so it is safe to run many at once. The off-greedy second read
-    is what keeps one awkward passage from costing a whole document its table.
-
-    The request goes in with the columns: the columns alone say what a row looks like, not which items
-    belong, so without it every list in the document that fits the columns came back as rows."""
+    # The request goes in too: columns alone made every list that fits them come back as rows
     listed = "\n".join(f"{i}. {c['name']}: {c['description']}" for i, c in enumerate(columns, start=1))
     asked = f"Request:\n{request}\n\n" if request else ""
     messages = [("system", EXTRACT_SYSTEM), ("human", f"{asked}Columns:\n{listed}\n\nPassage:\n{text}")]
@@ -263,7 +221,6 @@ def extract_one(text: str, columns: list[dict], model: str | None, request: str)
 
 
 def extract_from_table(text: str, columns: list[dict], model: str | None, request: str) -> ChunkRows:
-    """extract_one for a batch of one table's rows (see table_batches): the same call, framed as a table."""
     listed = "\n".join(f"{i}. {c['name']}: {c['description']}" for i, c in enumerate(columns, start=1))
     asked = f"Request:\n{request}\n\n" if request else ""
     messages = [("system", TABLE_EXTRACT_SYSTEM), ("human", f"{asked}Columns:\n{listed}\n\nTable:\n{text}")]
@@ -271,7 +228,7 @@ def extract_from_table(text: str, columns: list[dict], model: str | None, reques
 
 
 def table_batches(table: dict) -> list[str]:
-    """A table's Markdown in runs of TABLE_BATCH_ROWS rows, each under the table's caption and header."""
+    """Runs of TABLE_BATCH_ROWS rows, each under the table's caption and header."""
     lines = table["markdown"].splitlines()
     header, body = lines[:2], lines[2:]
     caption = f"{table['caption']}\n\n" if table.get("caption") else ""
@@ -280,13 +237,8 @@ def table_batches(table: dict) -> list[str]:
 
 
 def units_of(chunks: list[dict]) -> list[dict]:
-    """What run() reads, in document order: each table once, whole, at the first chunk that holds it, then
-    each chunk's own text -- its prose when it holds a table, so the table's rows are not read twice.
-
-    A chunk carries its tables under "tables" (resolved from its table_ids by the caller); one ingested
-    before tables were kept has none, and is read from its text as it always was. A row read from a table
-    cites the table's pages and regions, so its Highlight is the table, under the first chunk's id. Each
-    unit records the position of the chunk it was read at, for the progress run() reports."""
+    """What run() reads, in order: each table once, whole, at its first chunk, then each chunk's text.
+    A chunk holding a table contributes only its prose, so the table's rows are not read twice."""
     units: list[dict] = []
     seen: set[str] = set()
     for position, chunk in enumerate(chunks):
@@ -310,17 +262,13 @@ def units_of(chunks: list[dict]) -> list[dict]:
 
 
 def quoted(value: str, text: str) -> bool:
-    """Whether the passage states this value, word for word. Compared as words, ignoring case and
-    punctuation, so a quote the model re-spaced or re-punctuated still counts; a value the passage never
-    says ("masih berlaku" for a status it does not give, "tidak disebutkan", a list item's number read as
-    a document number) does not."""
+    """Whether the passage states this value word for word, ignoring case, spacing and punctuation."""
     words = " ".join(WORD.findall(value.lower()))
     return bool(words) and f" {words} " in f" {' '.join(WORD.findall(text.lower()))} "
 
 
 def find_duplicates(rows: list[dict], columns: list[dict], model: str | None) -> list[list[int]]:
-    """Which rows describe the same item, as groups of row numbers. The model only points at rows;
-    merge_rows does the merging, so a cell value is never rewritten -- it stays quoted as written."""
+    # The model only points at rows; merge_rows merges, so no cell value is ever rewritten
     listed = "\n".join(
         f"{i}. " + " | ".join(f"{c['name']}: {row['values'].get(c['name'], '')}" for c in columns)
         for i, row in enumerate(rows)
@@ -330,13 +278,9 @@ def find_duplicates(rows: list[dict], columns: list[dict], model: str | None) ->
 
 
 def merge_rows(rows: list[dict], groups: list[list[int]]) -> list[dict]:
-    """Fold each group of duplicate rows into one, at the place its first member was found.
-
-    The groups come from a model, so they are trusted only as far as they are valid: numbers out of
-    range, repeated, or already claimed by an earlier group are dropped, a member that contradicts
-    one already in its group stays a row of its own, and a group left with one member merges nothing.
-    The contradiction check is the one that matters -- measured on a real document, Qwen3.5-4B
-    grouped 90 of 99 rows, nearly all of them different items."""
+    """Fold each group into one row at its first member's place. Groups come from a model, so invalid
+    numbers are dropped and a member that contradicts its group stays apart (a 4B model grouped 90 of
+    99 rows, nearly all different items)."""
     claimed: set[int] = set()
     merged_at: dict[int, list[int]] = {}
     for group in groups:
@@ -351,16 +295,14 @@ def merge_rows(rows: list[dict], groups: list[list[int]]) -> list[dict]:
     merged = []
     for i, row in enumerate(rows):
         if i in claimed and i not in merged_at:
-            continue  # folded into an earlier row
+            continue
         merged.append(combine([rows[m] for m in merged_at.get(i, [i])]))
     return merged
 
 
 def same_item(a: dict, b: dict) -> bool:
-    """Two rows can be one item only if no column contradicts: in each, one value is empty, or one's
-    words are contained in the other's ("15 Februari 2027" in "paling lambat 15 Februari 2027"), or
-    they share most of their words (the same obligation worded two ways). Two items that differ in
-    any column -- a name, a deadline -- are two items, whatever the model said."""
+    """One item only if no column contradicts: per column, one value is empty, contains the other, or
+    shares most of its words."""
     return all(compatible(a["values"].get(name, ""), b["values"].get(name, "")) for name in a["values"])
 
 
@@ -372,8 +314,7 @@ def compatible(a: str, b: str) -> bool:
 
 
 def combine(duplicates: list[dict]) -> dict:
-    """One row from several that describe the same item: each cell takes the first non-empty value
-    (one mention may state a deadline another left out), and the row cites every chunk once."""
+    """Each cell takes the first non-empty value; the row cites every chunk once."""
     names = duplicates[0]["values"].keys()
     values = {name: next((d["values"][name] for d in duplicates if d["values"].get(name)), "") for name in names}
     citations: list[dict] = []
@@ -389,23 +330,14 @@ def run(
     should_stop: Callable[[], bool] | None = None,
     request: str = "",
 ) -> list[dict]:
-    """Read every chunk and return the rows found, each citing the chunk it came from.
+    """Rows found in the chunks, each citing its source, duplicates merged at the end.
 
-    A chunk's tables are read whole instead, once each, however many chunks they span (see units_of).
-    Rows keep document order, and a read the model fails on fails the whole run: a partial table would
-    silently claim to cover the whole document. should_stop is asked before each read's rows are taken,
-    and raises Stopped -- that is how a user cancels a run that has minutes left. Progress counts chunks.
-    Items found in more than one place are merged at the end (merge_rows). The caller decides which chunks
-    to pass: all of them, or the scope() of the request.
-
-    A value the passage or table does not state word for word is blanked (see quoted), and a row left with
-    no value at all is dropped: measured on Qwen3.5-4B, a status the passage never gives was filled in on
-    nearly every row, and headings came back as rows of blanks."""
+    A failed read fails the whole run: a partial table would silently claim to cover the document.
+    Values not quoted word for word are blanked and all-blank rows dropped, since small models invent
+    values and return headings as rows."""
     units = units_of(chunks)
     rows: list[dict] = []
-    # One HTTP call per unit, so it parallelises; map() keeps unit order however the calls interleave.
-    # Closing its iterator (on Stopped, or on a unit the model failed twice on) cancels every unit not
-    # yet started, so neither cancelling nor failing pays for the rest of the document.
+    # Leaving the block on Stopped or failure cancels every unit not yet started
     with ThreadPoolExecutor(max_workers=settings.llm_concurrency) as pool:
         extracted = pool.map(
             lambda unit: (extract_from_table if unit["table"] else extract_one)(unit["text"], columns, model, request),
@@ -418,8 +350,7 @@ def run(
                 raise Stopped()
             citation = {"n": 1, **unit["citation"], "source": "table", "text": unit["text"]}
             for row in found.rows:
-                # The model can return fewer values than there are columns; a column it skipped is
-                # a value the document does not state, which is an empty cell rather than a shift.
+                # Padded: a model returning fewer values than columns leaves cells empty
                 values = [v.strip() if quoted(v, unit["text"]) else "" for v in row.values] + [""] * len(columns)
                 if not any(values[:len(columns)]):
                     continue
@@ -427,21 +358,18 @@ def run(
                     "values": {c["name"]: v for c, v in zip(columns, values)},
                     "citations": [dict(citation)],
                 })
-            # Every chunk before the next unit's is fully read; after the last unit, all of them are
             done = units[i + 1]["chunk"] if i + 1 < len(units) else len(chunks)
             if on_progress and done > unit["chunk"]:
                 on_progress(done, len(chunks))
 
     if len(rows) < 2:
-        return rows  # nothing to merge, so no call
+        return rows
     if should_stop and should_stop():
         raise Stopped()
     try:
-        # ponytail: one merge call over every row, so a table past roughly the model's context window
-        # (a few hundred rows at LLM_NUM_CTX 16384) fails to merge. Merge in batches if that happens.
+        # ponytail: one merge call over every row, fails past the context window; merge in batches if it bites
         groups = find_duplicates(rows, columns, model)
     except Exception:
-        # The rows took minutes to read and are all correct, just not deduplicated; a failed merge is
-        # no reason to throw them away.
+        # Unmerged rows are still correct rows
         return rows
     return merge_rows(rows, groups)

@@ -1,6 +1,4 @@
-"""Unit tests for graph.py's question handling: recent_history's cap, contextualize's rewrite and
-decomposition into search queries (LLM stubbed), and how the retrievers use several queries. Retrieval
-and generate's own correctness are exercised live by test_smoke.py; these need no Neo4j or provider."""
+"""graph.py's question handling: history cap, query rewrite and split, multi-query retrieval. LLM stubbed."""
 import app.graph as graph_module
 
 

@@ -23,10 +23,7 @@ export function statusLabel(status: DocumentStatus, t: Dict): string {
   }[status];
 }
 
-/** The stage sequence a document actually goes through, per app/ingest/pipeline.py: short-mode
- * documents skip straight from embedding to done. mode is null until conversion finishes (it's
- * set in the same write that moves status to "embedding"), so before that we show the short path
- * as a best guess — never wrong, since both paths share this prefix. */
+/** mode is null until conversion ends, so show the short path until then: both share this prefix. */
 export function stagesFor(mode: 'short' | 'long' | null): DocumentStatus[] {
   const base: DocumentStatus[] = ['queued', 'converting', 'embedding'];
   return mode === 'long' ? [...base, 'building_tree', 'extracting_graph', 'done'] : [...base, 'done'];

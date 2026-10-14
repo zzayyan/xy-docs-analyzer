@@ -1,5 +1,4 @@
-"""Admin user management and changing your own password. The user store is faked; conftest.py signs every
-request in as ADMIN."""
+"""Admin user management and changing your own password. User store faked."""
 import pytest
 from fastapi.testclient import TestClient
 from neo4j.exceptions import ConstraintError
