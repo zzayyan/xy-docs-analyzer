@@ -64,7 +64,24 @@ Stack yang dipakai:
   riwayat percakapan
 - **Frontend:** React, TypeScript, Vite
 
-### 5.1 Alur ingest dokumen
+### 5.1 Arsitektur sistem
+
+![Arsitektur sistem](img/arsitektur-sistem.png)
+
+| Komponen | Kode | Peran |
+|---|---|---|
+| Web UI | `frontend/src/` | Upload, chat dengan sitasi, viewer halaman asli, outline, graph, Table Extraction, Settings. Memanggil API dengan cookie sesi, jawaban dibaca lewat SSE. |
+| FastAPI | `backend/app/api.py` | Semua endpoint REST dan stream SSE. Setiap request melewati cek sesi (`auth.require_user`), endpoint Settings dan Users hanya untuk admin. |
+| Auth | `backend/app/auth.py` | Password di-hash dengan scrypt. Sesi berupa token acak di cookie HttpOnly, disimpan dalam bentuk hash di Neo4j, sehingga logout langsung memutus sesi. |
+| Ingest | `backend/app/ingest/` | Jalan di `BackgroundTasks`. Konversi PDF dikunci satu per satu karena Docling butuh memori besar. Progres tiap tahap disimpan di node `File`. |
+| LangGraph RAG | `backend/app/graph.py`, `backend/app/retrieval/` | Alur tanya-jawab (bagian 5.3). |
+| Table Extraction | `backend/app/table.py` | Memilih bagian dokumen yang relevan, mengekstrak baris per chunk atau per tabel, lalu menggabungkan baris duplikat. Jalan di background dan bisa dibatalkan. |
+| Klien model | `backend/app/models.py`, `backend/app/model_settings.py` | Membuat klien Ollama atau OpenAI-compatible. Model yang diganti dari Settings disimpan di Neo4j dan langsung berlaku tanpa restart. Ganti model embedding memicu re-index di background (`backend/app/reindex.py`). |
+| Neo4j 5.26 | `docker-compose.yml`, `backend/app/db.py` | Satu database untuk semua data: `File`, `Chunk` (embedding dan indeks fulltext), `Section`, `__Entity__`, `DocTable`, `TableExtraction`, `Turn` (riwayat chat), `User`, `Session`, dan `Meta` (pengaturan model). |
+| File asli | `backend/data/originals/` | File yang diunggah disimpan apa adanya. Halaman PDF dirender ke gambar dengan pypdfium2 untuk highlight sitasi. |
+| Model | Docling, bge-m3, Qwen, Table LLM | Lihat bagian 4. Docling berjalan di dalam proses backend, model lain diakses lewat HTTP. |
+
+### 5.2 Alur ingest dokumen
 
 ![Alur ingest dokumen](img/alur-ingest.png)
 
@@ -80,7 +97,7 @@ Stack yang dipakai:
    - **Knowledge graph.** `LLMGraphTransformer` mengekstrak entitas (orang, organisasi, lokasi, konsep,
      peristiwa, produk, regulasi, tanggal) dan relasinya dari setiap chunk.
 
-### 5.2 Alur tanya-jawab
+### 5.3 Alur tanya-jawab
 
 ![Alur tanya-jawab RAG](img/alur-query.png)
 
@@ -116,6 +133,9 @@ Backend berjalan di `http://localhost:8000`. Dokumentasi interaktif (Swagger) te
 | `GET` | `/documents/{doc_id}/graph` | Knowledge graph dokumen panjang |
 | `POST` | `/documents/{doc_id}/tables` | Menjalankan Table Extraction |
 | `GET` | `/documents/{doc_id}/tables/{table_id}/export.xlsx` | Ekspor hasil Table Extraction ke Excel |
+| `POST` | `/auth/login`, `/auth/logout` | Masuk dan keluar, sesi disimpan di cookie HttpOnly |
+| `GET`, `PUT` | `/settings/models`, `/settings/embedding` | Mengganti model chat, Table Extraction, dan embedding (admin) |
+| `GET`, `POST`, `PATCH`, `DELETE` | `/users` | Mengelola akun pengguna (admin) |
 
 ## 7. Cara menjalankan
 
