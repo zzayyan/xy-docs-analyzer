@@ -1,5 +1,7 @@
 # docs-analyzer
 
+Laporan tugas besar (Bahasa Indonesia): [docs/laporan-tugas-besar.md](docs/laporan-tugas-besar.md)
+
 Document analyzer: hybrid vector + fulltext search for every document, plus a section
 tree and a knowledge graph for long ones. Documents past `LONG_DOC_TOKENS` (default
 20,000) also get a section outline and an entity/relationship graph extracted per chunk,
