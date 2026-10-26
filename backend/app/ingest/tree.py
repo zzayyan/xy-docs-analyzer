@@ -178,7 +178,9 @@ def build_tree(
     doc: DoclingDocument,
     chunks: list[dict],
     on_progress: Callable[[int, int], None] | None = None,
-) -> None:
+) -> int:
+    """Returns how many Sections were built."""
     sections, chunk_section = build_sections(file_id, headings_from_doc(doc), chunks)
     summarize_sections(sections, chunks, chunk_section, on_progress)
     store_tree(file_id, sections, chunk_section)
+    return len(sections)

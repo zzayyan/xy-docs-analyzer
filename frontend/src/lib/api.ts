@@ -100,8 +100,18 @@ export interface Document {
   step_total: number | null;
   llm_model: string | null;
   has_original: boolean;
+  language: string | null;
+  /** Pages without a text layer of their own, read by OCR */
+  ocr_pages: number | null;
+  /** The Short/Long cutoff in force when this Document was converted */
+  long_doc_tokens: number | null;
+  sections: number | null;
+  entities: number | null;
+  graph_skipped: number | null;
   /** Only getDocument sends it */
   page_count?: number | null;
+  /** When each stage began, in order; empty for Documents ingested before it was recorded */
+  timeline: { stage: DocumentStatus; started_at: number }[];
 }
 
 /** A Highlight box: top-left origin, PDF points, with its page's size for scaling. */

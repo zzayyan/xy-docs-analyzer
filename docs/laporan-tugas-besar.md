@@ -83,8 +83,9 @@ Stack yang dipakai:
 ![Alur ingest dokumen](img/alur-ingest.png)
 
 1. **Upload.** File asli disimpan apa adanya supaya sitasi nanti bisa membuka halaman aslinya.
-2. **Konversi (Docling).** Docling membaca layout, heading, dan tabel. PDF hasil scan (tanpa lapisan
-   teks) otomatis di-OCR.
+2. **Konversi (Docling).** Docling membaca layout, heading, dan tabel. Halaman hasil scan (tanpa lapisan
+   teks) otomatis di-OCR. Keputusan OCR dibuat per batch 25 halaman, jadi PDF campuran (sebagian scan,
+   sebagian teks digital) tetap terbaca utuh.
 3. **Chunking.** HybridChunker memecah dokumen menjadi chunk maksimal 512 token (dihitung dengan
    tokenizer bge-m3). Setiap chunk menyimpan nomor halaman, heading induk, dan bounding box di halaman.
    Bounding box inilah yang dipakai untuk highlight.
@@ -166,7 +167,8 @@ cd backend
 uv run pytest tests/ -q --ignore=tests/test_smoke.py --ignore=tests/test_models_live.py
 ```
 
-Hasil terakhir: **182 test lulus**. Test ini tidak membutuhkan database atau model.
+Hasil terakhir: **111 test lulus**. Semua test ini berjalan tanpa model, dan hanya satu
+(`test_users_and_sessions_in_neo4j`) yang membutuhkan Neo4j aktif.
 `tests/test_smoke.py` menjalankan alur ingest dan tanya-jawab end to end, sehingga membutuhkan Neo4j
 dan endpoint model yang aktif.
 

@@ -22,9 +22,3 @@ export function statusLabel(status: DocumentStatus, t: Dict): string {
     error: t.statusError,
   }[status];
 }
-
-/** mode is null until conversion ends, so show the short path until then: both share this prefix. */
-export function stagesFor(mode: 'short' | 'long' | null): DocumentStatus[] {
-  const base: DocumentStatus[] = ['queued', 'converting', 'embedding'];
-  return mode === 'long' ? [...base, 'building_tree', 'extracting_graph', 'done'] : [...base, 'done'];
-}

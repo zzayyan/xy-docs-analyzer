@@ -131,7 +131,11 @@ def list_files() -> list[dict]:
 
 def get_file(file_id: str) -> dict | None:
     rows = graph().query(GET_FILE, {"id": file_id})
-    return rows[0]["file"] if rows else None
+    if not rows:
+        return None
+    file = rows[0]["file"]
+    stages = zip(file.get("stage_names") or [], file.get("stage_starts") or [])
+    return {**file, "timeline": [{"stage": stage, "started_at": at} for stage, at in stages]}
 
 
 def delete_file(file_id: str) -> None:
@@ -146,7 +150,8 @@ RESET_INGEST = [
     "MATCH (n:__Entity__ {file_id: $id}) DETACH DELETE n",
     "MATCH (f:File {id: $id}) SET f.status = 'queued', f.progress = 0.0, f.error = null, f.step_done = 0, "
     "f.step_total = 0, f.mode = null, f.tokens = null, f.chunks = null, f.graph_skipped = null, f.language = null, "
-    "f.updated_at = timestamp()",
+    "f.ocr_pages = null, f.long_doc_tokens = null, f.sections = null, f.entities = null, "
+    "f.stage_names = ['queued'], f.stage_starts = [timestamp()], f.updated_at = timestamp()",
 ]
 
 

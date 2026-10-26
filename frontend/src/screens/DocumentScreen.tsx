@@ -14,9 +14,11 @@ import { STATUS_TONE, statusLabel } from '../lib/status';
 import { useLang } from '../lib/i18n';
 import { navigate } from '../lib/useHashRoute';
 
-type Tab = 'chat' | 'outline' | 'graph';
+type Tab = 'chat' | 'outline' | 'graph' | 'process';
 
-const TAB_LABEL = { chat: 'tabChat', outline: 'tabOutline', graph: 'tabGraph' } as const;
+const TAB_LABEL = { chat: 'tabChat', outline: 'tabOutline', graph: 'tabGraph', process: 'tabProcess' } as const;
+
+const PROCESS_PANE = { height: '100%', overflowY: 'auto', boxSizing: 'border-box', padding: '32px var(--space-6)' } as const;
 
 export function DocumentScreen({ docId }: { docId: string }) {
   const { t, lang } = useLang();
@@ -84,9 +86,9 @@ export function DocumentScreen({ docId }: { docId: string }) {
           </div>
         )}
 
-        {doc?.status === 'done' && doc.mode === 'long' && (
+        {doc?.status === 'done' && (
           <div className="segmented" role="tablist">
-            {(['chat', 'outline', 'graph'] as const).map((key) => (
+            {(doc.mode === 'long' ? (['chat', 'outline', 'graph', 'process'] as const) : (['chat', 'process'] as const)).map((key) => (
               <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
                 {t[TAB_LABEL[key]]}
               </button>
@@ -116,34 +118,34 @@ export function DocumentScreen({ docId }: { docId: string }) {
           </div>
         )}
 
-        {doc && isInFlight(doc.status) && (
-          <div style={{ padding: '32px var(--space-6)', maxWidth: 720 }}>
-            <IngestProgress doc={doc} />
-          </div>
-        )}
-
-        {doc?.status === 'error' && (
-          <div style={{ padding: 'var(--space-6)', maxWidth: 720 }}>
-            <Alert tone="danger" title={t.docErrorTitle}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-                <span>{t.docErrorReupload}</span>
-                {doc.error && <ErrorDetail message={doc.error} limit={160} />}
-                {doc.has_original && (
-                  <button
-                    className="quiet-button"
-                    style={{ alignSelf: 'flex-start' }}
-                    onClick={() => retryMutation.mutate()}
-                    disabled={retryMutation.isPending}
-                  >
-                    {retryMutation.isPending ? t.docRetrying : t.docRetry}
-                  </button>
-                )}
-              </div>
-            </Alert>
+        {doc && (doc.status !== 'done' || tab === 'process') && (
+          <div style={PROCESS_PANE}>
+            <div style={{ maxWidth: 720, display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+              {doc.status === 'error' && (
+                <Alert tone="danger" title={t.docErrorTitle}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                    <span>{t.docErrorReupload}</span>
+                    {doc.error && <ErrorDetail message={doc.error} limit={160} />}
+                    {doc.has_original && (
+                      <button
+                        className="quiet-button"
+                        style={{ alignSelf: 'flex-start' }}
+                        onClick={() => retryMutation.mutate()}
+                        disabled={retryMutation.isPending}
+                      >
+                        {retryMutation.isPending ? t.docRetrying : t.docRetry}
+                      </button>
+                    )}
+                  </div>
+                </Alert>
+              )}
+              {(doc.status !== 'error' || doc.timeline.length > 0) && <IngestProgress doc={doc} />}
+            </div>
           </div>
         )}
 
         {doc?.status === 'done' &&
+          tab !== 'process' &&
           (tab === 'outline' && doc.mode === 'long' ? (
             <OutlinePanel docId={doc.id} />
           ) : tab === 'graph' && doc.mode === 'long' ? (

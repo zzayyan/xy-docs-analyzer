@@ -166,6 +166,11 @@ class Upload(BaseModel):
     doc_id: str
 
 
+class Stage(BaseModel):
+    stage: str
+    started_at: int
+
+
 class Document(BaseModel):
     id: str
     name: str
@@ -181,9 +186,15 @@ class Document(BaseModel):
     step_total: int | None = None
     llm_model: str | None = None
     language: str | None = None
+    ocr_pages: int | None = None
+    long_doc_tokens: int | None = None
+    sections: int | None = None
+    entities: int | None = None
+    graph_skipped: int | None = None
     has_original: bool = False
     # Only on GET /documents/{id}: counting pages for the whole list would open every PDF
     page_count: int | None = None
+    timeline: list[Stage] = []
 
 
 class Region(BaseModel):

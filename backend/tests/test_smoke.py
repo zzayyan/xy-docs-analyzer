@@ -50,6 +50,7 @@ def upload_sample(tmp_path) -> dict:
 def test_short_document_upload_then_chat(tmp_path):
     status = upload_sample(tmp_path)
     assert status["mode"] == "short"
+    assert [s["stage"] for s in status["timeline"]] == ["queued", "converting", "embedding", "done"]
 
     body = ask(status["id"], "Siapa kontraktor pelaksana proyek?")
     assert "Karya Beton" in body["answer"], body["answer"]
@@ -60,6 +61,8 @@ def test_long_document_builds_knowledge_graph(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "long_doc_tokens", 10)
     status = upload_sample(tmp_path)
     assert status["mode"] == "long"
+    assert [s["stage"] for s in status["timeline"]] == ["queued", "converting", "embedding", "building_tree", "extracting_graph", "done"]
+    assert status["sections"] >= 1 and status["entities"] >= 2, status
 
     [row] = graph().query(
         """

@@ -17,25 +17,12 @@ from app.config import settings
 
 PDF_BATCH_PAGES = 25
 TEXT_LAYER_CHARS = 100
-TEXT_LAYER_SAMPLE = 10
 
 
 @lru_cache
 def converter(ocr: bool = True) -> DocumentConverter:
     options = PdfPipelineOptions(do_ocr=ocr)
     return DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)})
-
-
-def has_text_layer(path: str) -> bool:
-    # PDFium is not thread-safe, so share Docling's lock. Never hold it around convert(), which takes it.
-    with pypdfium2_lock:
-        pdf = pypdfium2.PdfDocument(path)
-        try:
-            step = max(1, len(pdf) // TEXT_LAYER_SAMPLE)
-            sampled = [len(pdf[i].get_textpage().get_text_range().strip()) for i in range(0, len(pdf), step)]
-            return sum(sampled) / len(sampled) > TEXT_LAYER_CHARS
-        finally:
-            pdf.close()
 
 
 @lru_cache
@@ -89,28 +76,53 @@ def regions_of(doc_items, pages: dict[int, PageItem]) -> list[dict]:
     return regions
 
 
-def convert_document(path: str, on_progress: Callable[[int, int], None] | None = None) -> DoclingDocument:
-    if Path(path).suffix.lower() != ".pdf":
+def is_pdf(path: str) -> bool:
+    return Path(path).suffix.lower() == ".pdf"
+
+
+def scanned_pages(path: str) -> set[int]:
+    """1-based numbers of the PDF pages without a text layer of their own, which only OCR can read."""
+    if not is_pdf(path):
+        return set()
+    # PDFium is not thread-safe, so share Docling's lock. Never hold it around convert(), which takes it.
+    with pypdfium2_lock:
+        pdf = pypdfium2.PdfDocument(path)
+        try:
+            return {
+                i + 1 for i in range(len(pdf))
+                if len(pdf[i].get_textpage().get_text_range().strip()) <= TEXT_LAYER_CHARS
+            }
+        finally:
+            pdf.close()
+
+
+def convert_document(
+    path: str, scanned: set[int], on_progress: Callable[[int, int], None] | None = None,
+) -> DoclingDocument:
+    if not is_pdf(path):
         return converter().convert(path).document
     # Docling memory grows within one convert(): 25 pages peak at ~14 GB, 100 pages killed the worker.
     # Contiguous batches from page 1 keep absolute page numbers through concatenate().
     # ponytail: a batch whose first page fails to convert shifts later page numbers by one
     total = page_count(path)
-    # OCR on a born-digital PDF costs ~70% more time for no gain
-    pdf_converter = converter(ocr=not has_text_layer(path))
+    if on_progress:
+        on_progress(0, total)
     docs = []
     for start in range(1, total + 1, PDF_BATCH_PAGES):
         end = min(start + PDF_BATCH_PAGES - 1, total)
-        docs.append(pdf_converter.convert(path, page_range=(start, end)).document)
+        # OCR costs ~70% more time, so only a batch holding a scanned page pays for it. Docling then OCRs only
+        # the regions with no text of their own, so the batch's born-digital pages keep their text layer.
+        ocr = not scanned.isdisjoint(range(start, end + 1))
+        docs.append(converter(ocr=ocr).convert(path, page_range=(start, end)).document)
         if on_progress:
             on_progress(end, total)
     return DoclingDocument.concatenate(docs)
 
 
 def convert(
-    path: str, on_progress: Callable[[int, int], None] | None = None,
+    path: str, scanned: set[int], on_progress: Callable[[int, int], None] | None = None,
 ) -> tuple[DoclingDocument, int, list[dict]]:
-    doc = convert_document(path, on_progress)
+    doc = convert_document(path, scanned, on_progress)
     tokens = tokenizer().count_tokens(doc.export_to_markdown())
 
     chunker = HybridChunker(tokenizer=tokenizer(), merge_peers=True)

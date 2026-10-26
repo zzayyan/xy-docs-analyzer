@@ -123,6 +123,20 @@ export interface Dict {
   docErrorReupload: string;
   docRetry: string;
   docRetrying: string;
+  tabProcess: string;
+  ocrPages: (scanned: number, pages: number) => string;
+  ocrOff: string;
+  stageTokensChunks: (tokens: string, chunks: number) => string;
+  stageLanguage: (language: string) => string;
+  stageMode: (long: boolean, tokens: string, limit: string) => string;
+  stageEmbedded: (chunks: number) => string;
+  stageSummarized: (sections: number) => string;
+  stageEntities: (entities: number, chunks: number) => string;
+  stageGraphSkipped: (chunks: number) => string;
+  stageSkipped: string;
+  stageQueuedHint: string;
+  stageFailed: string;
+  stageTotal: (duration: string) => string;
 
   chatPlaceholder: string;
   chatSend: string;
@@ -309,6 +323,20 @@ const en: Dict = {
   docErrorReupload: 'This document could not be processed. Try again, or delete it and upload the original file again.',
   docRetry: 'Try again',
   docRetrying: 'Starting...',
+  tabProcess: 'Process',
+  ocrPages: (scanned, pages) => `OCR on: ${scanned} of ${pages} page${pages === 1 ? '' : 's'} have no text layer`,
+  ocrOff: 'OCR off: every page has a text layer',
+  stageTokensChunks: (tokens, chunks) => `${tokens} tokens split into ${chunks} chunk${chunks === 1 ? '' : 's'}`,
+  stageLanguage: (language) => `Language: ${language}`,
+  stageMode: (long, tokens, limit) => (long ? `Long mode: ${tokens} > ${limit} tokens` : `Short mode: ${tokens} ≤ ${limit} tokens`),
+  stageEmbedded: (chunks) => `${chunks} chunk${chunks === 1 ? '' : 's'} turned into vectors`,
+  stageSummarized: (sections) => `${sections} section${sections === 1 ? '' : 's'} summarized`,
+  stageEntities: (entities, chunks) => `${entities} entities found in ${chunks} chunk${chunks === 1 ? '' : 's'}`,
+  stageGraphSkipped: (chunks) => `${chunks} chunk${chunks === 1 ? '' : 's'} skipped: extraction failed`,
+  stageSkipped: 'Skipped: only runs for long documents',
+  stageQueuedHint: 'Waiting for another document to finish converting',
+  stageFailed: 'Failed at this stage',
+  stageTotal: (duration) => `Total ${duration}`,
 
   chatPlaceholder: 'Ask about this document',
   chatSend: 'Send',
@@ -498,6 +526,20 @@ const id: Dict = {
   docErrorReupload: 'Dokumen ini gagal diproses. Coba lagi, atau hapus dan unggah ulang berkas aslinya.',
   docRetry: 'Coba lagi',
   docRetrying: 'Memulai...',
+  tabProcess: 'Proses',
+  ocrPages: (scanned, pages) => `OCR aktif: ${scanned} dari ${pages} halaman tanpa lapisan teks`,
+  ocrOff: 'OCR mati: semua halaman punya lapisan teks',
+  stageTokensChunks: (tokens, chunks) => `${tokens} token dipecah menjadi ${chunks} chunk`,
+  stageLanguage: (language) => `Bahasa: ${language}`,
+  stageMode: (long, tokens, limit) => (long ? `Mode Panjang: ${tokens} > ${limit} token` : `Mode Pendek: ${tokens} ≤ ${limit} token`),
+  stageEmbedded: (chunks) => `${chunks} chunk diubah menjadi vektor`,
+  stageSummarized: (sections) => `${sections} bagian diringkas`,
+  stageEntities: (entities, chunks) => `${entities} entitas ditemukan di ${chunks} chunk`,
+  stageGraphSkipped: (chunks) => `${chunks} chunk dilewati: ekstraksi gagal`,
+  stageSkipped: 'Dilewati: hanya untuk dokumen panjang',
+  stageQueuedHint: 'Menunggu dokumen lain selesai dikonversi',
+  stageFailed: 'Gagal di tahap ini',
+  stageTotal: (duration) => `Total ${duration}`,
 
   chatPlaceholder: 'Tanya tentang dokumen ini',
   chatSend: 'Kirim',
