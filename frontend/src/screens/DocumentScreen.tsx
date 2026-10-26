@@ -7,7 +7,6 @@ import { ErrorDetail } from '../components/ErrorDetail';
 import { IngestProgress } from '../components/IngestProgress';
 import { GraphPanel } from '../components/GraphPanel';
 import { OutlinePanel } from '../components/OutlinePanel';
-import { TablePanel } from '../components/TablePanel';
 import { Toast } from '../components/Toast';
 import { api, ApiError, isInFlight } from '../lib/api';
 import { formatRelative } from '../lib/format';
@@ -15,9 +14,9 @@ import { STATUS_TONE, statusLabel } from '../lib/status';
 import { useLang } from '../lib/i18n';
 import { navigate } from '../lib/useHashRoute';
 
-type Tab = 'chat' | 'outline' | 'graph' | 'table';
+type Tab = 'chat' | 'outline' | 'graph';
 
-const TAB_LABEL = { chat: 'tabChat', outline: 'tabOutline', graph: 'tabGraph', table: 'tabTable' } as const;
+const TAB_LABEL = { chat: 'tabChat', outline: 'tabOutline', graph: 'tabGraph' } as const;
 
 export function DocumentScreen({ docId }: { docId: string }) {
   const { t, lang } = useLang();
@@ -85,9 +84,9 @@ export function DocumentScreen({ docId }: { docId: string }) {
           </div>
         )}
 
-        {doc?.status === 'done' && (
+        {doc?.status === 'done' && doc.mode === 'long' && (
           <div className="segmented" role="tablist">
-            {(doc.mode === 'long' ? (['chat', 'outline', 'graph', 'table'] as const) : (['chat', 'table'] as const)).map((key) => (
+            {(['chat', 'outline', 'graph'] as const).map((key) => (
               <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}>
                 {t[TAB_LABEL[key]]}
               </button>
@@ -145,9 +144,7 @@ export function DocumentScreen({ docId }: { docId: string }) {
         )}
 
         {doc?.status === 'done' &&
-          (tab === 'table' ? (
-            <TablePanel docId={doc.id} />
-          ) : tab === 'outline' && doc.mode === 'long' ? (
+          (tab === 'outline' && doc.mode === 'long' ? (
             <OutlinePanel docId={doc.id} />
           ) : tab === 'graph' && doc.mode === 'long' ? (
             <GraphPanel docId={doc.id} />

@@ -4,7 +4,6 @@ import json
 import pytest
 
 import app.graph as graph_mod
-import app.store as store_module
 
 
 class Recorder:
@@ -16,25 +15,6 @@ class Recorder:
 
 
 REGION = {"page": 1, "l": 0, "t": 0, "r": 10, "b": 10, "page_width": 600, "page_height": 800}
-
-
-def test_list_chunks_decodes_a_json_regions_string(monkeypatch):
-    monkeypatch.setattr(store_module, "graph", lambda: Recorder(
-        [{"id": "f:0", "text": "t", "pages": [1], "headings": [], "regions": json.dumps([REGION])}]
-    ))
-
-    [chunk] = store_module.list_chunks("f")
-
-    assert chunk["regions"] == [REGION]
-
-
-def test_list_chunks_treats_a_missing_regions_property_as_no_highlight(monkeypatch):
-    # A chunk written before this feature shipped: Neo4j returns the property as None
-    monkeypatch.setattr(store_module, "graph", lambda: Recorder(
-        [{"id": "f:0", "text": "t", "pages": [1], "headings": [], "regions": None}]
-    ))
-
-    assert store_module.list_chunks("f")[0]["regions"] == []
 
 
 def test_contexts_decodes_regions_and_tags_the_source():
@@ -64,7 +44,7 @@ def test_ingest_writes_each_chunks_regions_to_neo4j_as_json(monkeypatch):
         {"idx": 1, "text": "b", "pages": [], "headings": [], "regions": []},
     ]
     monkeypatch.setattr(pipeline, "graph", lambda: Graph())
-    monkeypatch.setattr(pipeline, "convert", lambda path, on_progress=None: (None, 10, chunks, []))
+    monkeypatch.setattr(pipeline, "convert", lambda path, on_progress=None: (None, 10, chunks))
     monkeypatch.setattr(pipeline, "embeddings", lambda: type("E", (), {"embed_documents": lambda self, texts: [[0.0]] * len(texts)})())
 
     pipeline.ingest("f", "doc.pdf")
@@ -119,7 +99,7 @@ def test_ingest_records_the_document_language_and_survives_failing_to_detect_it(
 
     chunks = [{"idx": 0, "text": "Pasal 1 Pihak pertama wajib membayar", "pages": [1], "headings": [], "regions": []}]
     monkeypatch.setattr(pipeline, "graph", lambda: Graph())
-    monkeypatch.setattr(pipeline, "convert", lambda path, on_progress=None: (None, 10, chunks, []))
+    monkeypatch.setattr(pipeline, "convert", lambda path, on_progress=None: (None, 10, chunks))
     monkeypatch.setattr(pipeline, "embeddings", lambda: type("E", (), {"embed_documents": lambda self, texts: [[0.0]] * len(texts)})())
 
     for answer, expected in (("Indonesian ", "Indonesian"), (RuntimeError("model down"), None)):

@@ -19,13 +19,6 @@ class Settings(BaseSettings):
     # Comma-separated extra model names on the same endpoint as llm_model
     llm_model_choices: str = ""
 
-    # Table Extraction's own OpenAI-compatible model; unset, tables use the document's model
-    table_llm_base_url: str = ""
-    table_llm_api_key: str = ""
-    table_llm_model: str = ""
-    # Generous: reasoning models think before answering
-    table_llm_max_tokens: int = 8000
-
     embed_provider: Provider = "ollama"
     embed_base_url: str = "http://localhost:11434"
     embed_api_key: str = ""

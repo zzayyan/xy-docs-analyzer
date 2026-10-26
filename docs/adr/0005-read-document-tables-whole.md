@@ -4,7 +4,7 @@ Date: 2026-10-05
 
 ## Status
 
-Accepted
+Deprecated: Table Extraction was removed on 2026-10-23.
 
 ## Context
 

@@ -12,7 +12,6 @@ client = TestClient(app)
 FORM = {
     "llm_provider": "openai", "llm_base_url": "https://api.example.com/v1/", "llm_api_key": "sk-new-key-1234",
     "llm_model": "big-model", "llm_model_choices": "small-model", "llm_reasoning_effort": "",
-    "table_llm_base_url": "", "table_llm_api_key": None, "table_llm_model": "",
 }
 
 
@@ -36,7 +35,6 @@ def stored(monkeypatch):
     monkeypatch.setattr(model_settings, "graph", lambda: Graph())
     monkeypatch.setitem(model_settings.ENV, "llm_api_key", "sk-env-key-9999")
     monkeypatch.setitem(model_settings.ENV, "llm_model", "env-model")
-    monkeypatch.setitem(model_settings.ENV, "table_llm_api_key", "")
     model_settings.apply({})
     yield node
     monkeypatch.undo()
@@ -77,7 +75,6 @@ def test_keys_go_out_masked_and_a_masked_or_missing_key_keeps_the_stored_one(sto
     {"llm_base_url": "api.example.com"},
     {"llm_model": " "},
     {"llm_provider": "ollama", "llm_base_url": "ftp://x"},
-    {"table_llm_model": "t", "table_llm_base_url": "https://t.example.com"},
 ])
 def test_a_broken_form_is_refused_and_changes_nothing(stored, change):
     response = client.put("/settings/models", json={**FORM, **change})
@@ -127,8 +124,8 @@ def test_the_connection_test_uses_the_form_and_falls_back_to_the_stored_key(stor
     assert ok["reply"] == "OK"
     assert calls[-1] == ("ollama", "http://localhost:11434", "sk-env-key-9999", "qwen3:14b")
 
-    client.post("/settings/models/test", json={"slot": "table", "provider": "ollama", "base_url": "https://t", "model": "t", "api_key": "sk-typed"})
-    assert calls[-1] == ("openai", "https://t", "sk-typed", "t"), "the table model is always OpenAI-compatible"
+    client.post("/settings/models/test", json={"slot": "chat", "base_url": "https://t", "model": "t", "api_key": "sk-typed"})
+    assert calls[-1] == ("openai", "https://t", "sk-typed", "t")
 
     failed = client.post("/settings/models/test", json={"slot": "chat", "base_url": "http://x", "model": "down"}).json()
     assert failed["ok"] is False

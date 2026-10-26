@@ -396,10 +396,8 @@ function ModelsForm({ loaded }: { loaded: ModelSettingsView }) {
   const [form, setForm] = useState<ModelSettings>({
     ...loaded,
     llm_api_key: '',
-    table_llm_api_key: '',
     llm_reasoning_effort: loaded.llm_reasoning_effort ?? '',
   });
-  const [ownTableModel, setOwnTableModel] = useState(loaded.table_llm_model !== '');
   const [confirmReset, setConfirmReset] = useState(false);
   const set = (changes: Partial<ModelSettings>) => setForm((f) => ({ ...f, ...changes }));
 
@@ -412,8 +410,6 @@ function ModelsForm({ loaded }: { loaded: ModelSettingsView }) {
       api.saveModelSettings({
         ...form,
         llm_api_key: form.llm_api_key || null,
-        table_llm_api_key: form.table_llm_api_key || null,
-        table_llm_model: ownTableModel ? form.table_llm_model : '',
       }),
     onSuccess: done,
   });
@@ -501,50 +497,6 @@ function ModelsForm({ loaded }: { loaded: ModelSettingsView }) {
             reasoning_effort: form.llm_reasoning_effort || null,
           }}
         />
-      </div>
-
-      <div className="settings-card">
-        <h3>{t.modelsTable}</h3>
-        <label className="settings-check">
-          <input type="checkbox" checked={ownTableModel} onChange={(e) => setOwnTableModel(e.target.checked)} />
-          {t.modelsTableOwn}
-        </label>
-        <p className="settings-muted">{ownTableModel ? t.modelsTableHint : t.modelsTableOff}</p>
-        {ownTableModel && (
-          <>
-            <div className="settings-fields">
-              <label className="login-label">
-                {t.modelsBaseUrl}
-                <input
-                  className="field"
-                  required
-                  placeholder="https://integrate.api.nvidia.com/v1"
-                  value={form.table_llm_base_url}
-                  onChange={(e) => set({ table_llm_base_url: e.target.value })}
-                />
-              </label>
-              <label className="login-label">
-                {t.modelsModel}
-                <input className="field" required value={form.table_llm_model} onChange={(e) => set({ table_llm_model: e.target.value })} />
-              </label>
-              <KeyField
-                value={form.table_llm_api_key ?? ''}
-                stored={loaded.table_llm_api_key}
-                onChange={(v) => set({ table_llm_api_key: v })}
-              />
-            </div>
-            <TestButton
-              test={{
-                slot: 'table',
-                provider: 'openai',
-                base_url: form.table_llm_base_url,
-                api_key: form.table_llm_api_key || null,
-                model: form.table_llm_model,
-                reasoning_effort: null,
-              }}
-            />
-          </>
-        )}
       </div>
 
       <div className="settings-actions">

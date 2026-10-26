@@ -10,7 +10,6 @@ const SOURCE_LABEL_KEY = {
   tree: 'citationSourceTree',
   kg: 'citationSourceKg',
   kg_facts: 'citationSourceKgFacts',
-  table: 'citationSourceTable',
 } as const;
 
 /** Docked beside the conversation, not a modal, so the citing answer stays readable. */

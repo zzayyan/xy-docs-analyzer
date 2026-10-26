@@ -63,14 +63,6 @@ def _llm(model: str, temperature: float = 0.0, max_tokens: int | None = None) ->
     )
 
 
-@lru_cache
-def table_llm(temperature: float = 0.0, max_tokens: int | None = None) -> BaseChatModel:
-    return chat_model(
-        "openai", settings.table_llm_base_url, settings.table_llm_api_key, settings.table_llm_model,
-        temperature=temperature, max_tokens=max_tokens, key_name="TABLE_LLM_API_KEY",
-    )
-
-
 def embedding_model(provider: str, base_url: str, api_key: str, model: str) -> Embeddings:
     if provider == "openai":
         return OpenAIEmbeddings(

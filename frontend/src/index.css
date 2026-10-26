@@ -381,14 +381,6 @@ dialog::backdrop {
 .settings-table tbody tr + tr td {
   border-top: var(--stroke-hairline) solid var(--border-subtle);
 }
-.settings-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--fs-ui-sm);
-  color: var(--text-title);
-  cursor: pointer;
-}
 .settings-test {
   display: flex;
   flex-wrap: wrap;

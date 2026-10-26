@@ -55,10 +55,6 @@ export interface Dict {
   modelsReasoning: string;
   modelsChoices: string;
   modelsChoicesHint: string;
-  modelsTable: string;
-  modelsTableOwn: string;
-  modelsTableHint: string;
-  modelsTableOff: string;
   modelsTest: string;
   modelsTesting: string;
   modelsTestOk: (ms: number) => string;
@@ -154,7 +150,6 @@ export interface Dict {
   citationSourceTree: string;
   citationSourceKg: string;
   citationSourceKgFacts: string;
-  citationSourceTable: string;
   citationClose: string;
   citationPageOf: (i: number, n: number) => string;
   citationPrevPage: string;
@@ -187,45 +182,6 @@ export interface Dict {
   graphFit: string;
   graphTypes: Record<string, string>;
 
-  tabTable: string;
-  tableIntro: string;
-  tablePlaceholder: string;
-  tableProposeAction: string;
-  tableSuggestAction: string;
-  tableSuggesting: string;
-  tableSuggestionsTitle: string;
-  tableSuggestionsEmpty: string;
-  tableProposing: string;
-  tableColumnsTitle: string;
-  tableColumnName: string;
-  tableColumnDescription: string;
-  tableColumnAdd: string;
-  tableColumnRemove: string;
-  tableRunAction: string;
-  tableRunningTitle: string;
-  tableRunningHint: string;
-  tableProgress: (percent: number) => string;
-  tableRowCount: (n: number) => string;
-  tableCitationsLabel: string;
-  tableNothingFound: string;
-  tableErrorTitle: string;
-  tableRetry: string;
-  tableHistoryTitle: string;
-  tableNewAction: string;
-  tableStatusQueued: string;
-  tableStatusRunning: string;
-  tableStatusDone: string;
-  tableStatusError: string;
-  tableStatusCancelled: string;
-  tableCancelAction: string;
-  tableCancelledNotice: string;
-  tableReadScope: (parts: number, chunks: number, total: number) => string;
-  tableReadAll: string;
-  tableExportAction: string;
-  tableDeleteAction: string;
-  tableDeleteConfirmTitle: string;
-  tableDeleteConfirmBody: (request: string) => string;
-  tableRowDelete: string;
 }
 
 const en: Dict = {
@@ -282,10 +238,6 @@ const en: Dict = {
   modelsReasoning: 'Reasoning effort (optional)',
   modelsChoices: 'More models in the chat picker',
   modelsChoicesHint: 'Comma-separated, served by the same server.',
-  modelsTable: 'Table Extraction model',
-  modelsTableOwn: 'Use a separate model for Table Extraction',
-  modelsTableHint: 'Any OpenAI-compatible server. Every table call goes there.',
-  modelsTableOff: 'Tables use the chat model of each document.',
   modelsTest: 'Test connection',
   modelsTesting: 'Testing…',
   modelsTestOk: (ms) => `Connected in ${ms} ms`,
@@ -384,7 +336,6 @@ const en: Dict = {
   citationSourceTree: 'Document outline',
   citationSourceKg: 'Knowledge graph evidence',
   citationSourceKgFacts: 'Knowledge graph facts',
-  citationSourceTable: 'Table extraction',
   citationClose: 'Close',
   citationPageOf: (i, n) => `Page ${i} of ${n}`,
   citationPrevPage: 'Previous page',
@@ -420,46 +371,6 @@ const en: Dict = {
     Event: 'Event', Product: 'Product', Regulation: 'Regulation', Date: 'Date / value',
   },
 
-  tabTable: 'Table',
-  tableIntro: 'Describe what to pull out of this document, and the columns are proposed for you to edit.',
-  tablePlaceholder: 'e.g. every obligation, its due date and amount',
-  tableProposeAction: 'Propose columns',
-  tableSuggestAction: 'Suggest tables from this document',
-  tableSuggesting: 'Reading the document...',
-  tableSuggestionsTitle: 'Tables worth pulling out of this document',
-  tableSuggestionsEmpty: 'No table suggested itself from this document. Describe one yourself above.',
-  tableProposing: 'Proposing columns...',
-  tableColumnsTitle: 'Columns',
-  tableColumnName: 'Name',
-  tableColumnDescription: 'What belongs in this column',
-  tableColumnAdd: 'Add column',
-  tableColumnRemove: 'Remove',
-  tableRunAction: 'Run table extraction',
-  tableRunningTitle: 'Reading every chunk of the document',
-  tableRunningHint: 'This takes a while. You can leave this tab; the run keeps going.',
-  tableProgress: (percent) => `${percent}% read`,
-  tableRowCount: (n) => `${n} row${n === 1 ? '' : 's'}`,
-  tableCitationsLabel: 'Citations',
-  tableNothingFound: 'Nothing in this document matched these columns.',
-  tableErrorTitle: 'The table extraction failed',
-  tableRetry: 'Run again',
-  tableHistoryTitle: 'Earlier table extractions',
-  tableNewAction: 'New table',
-  tableStatusQueued: 'Queued',
-  tableStatusRunning: 'Running',
-  tableStatusDone: 'Done',
-  tableStatusError: 'Failed',
-  tableStatusCancelled: 'Stopped',
-  tableCancelAction: 'Stop',
-  tableCancelledNotice: 'You stopped this run, so it has no rows. Its columns are kept.',
-  tableReadScope: (parts, chunks, total) =>
-    `Read only the ${parts === 1 ? 'part' : `${parts} parts`} that answer the request (${chunks} of ${total} passages):`,
-  tableReadAll: 'Read the whole document instead',
-  tableExportAction: 'Export XLSX',
-  tableDeleteAction: 'Delete table',
-  tableDeleteConfirmTitle: 'Delete this table extraction?',
-  tableDeleteConfirmBody: (request) => `"${request}" and all of its rows will be deleted. This cannot be undone.`,
-  tableRowDelete: 'Delete row',
 };
 
 const id: Dict = {
@@ -516,10 +427,6 @@ const id: Dict = {
   modelsReasoning: 'Reasoning effort (opsional)',
   modelsChoices: 'Model tambahan di pilihan chat',
   modelsChoicesHint: 'Pisahkan dengan koma, dari server yang sama.',
-  modelsTable: 'Model Table Extraction',
-  modelsTableOwn: 'Pakai model terpisah untuk Table Extraction',
-  modelsTableHint: 'Server OpenAI-compatible apa pun. Semua panggilan tabel diarahkan ke sana.',
-  modelsTableOff: 'Tabel memakai model chat masing-masing dokumen.',
   modelsTest: 'Tes koneksi',
   modelsTesting: 'Menguji…',
   modelsTestOk: (ms) => `Terhubung dalam ${ms} ms`,
@@ -618,7 +525,6 @@ const id: Dict = {
   citationSourceTree: 'Daftar isi dokumen',
   citationSourceKg: 'Bukti graf pengetahuan',
   citationSourceKgFacts: 'Fakta graf pengetahuan',
-  citationSourceTable: 'Ekstraksi tabel',
   citationClose: 'Tutup',
   citationPageOf: (i, n) => `Halaman ${i} dari ${n}`,
   citationPrevPage: 'Halaman sebelumnya',
@@ -654,46 +560,6 @@ const id: Dict = {
     Event: 'Peristiwa', Product: 'Produk', Regulation: 'Regulasi', Date: 'Tanggal / nilai',
   },
 
-  tabTable: 'Tabel',
-  tableIntro: 'Jelaskan apa yang ingin diambil dari dokumen ini, lalu kolomnya diusulkan untuk Anda sunting.',
-  tablePlaceholder: 'mis. setiap kewajiban, tenggat, dan nilainya',
-  tableProposeAction: 'Usulkan kolom',
-  tableSuggestAction: 'Sarankan tabel dari dokumen ini',
-  tableSuggesting: 'Membaca dokumen...',
-  tableSuggestionsTitle: 'Tabel yang layak diambil dari dokumen ini',
-  tableSuggestionsEmpty: 'Tidak ada tabel yang tersarankan dari dokumen ini. Jelaskan sendiri di atas.',
-  tableProposing: 'Menyusun kolom...',
-  tableColumnsTitle: 'Kolom',
-  tableColumnName: 'Nama',
-  tableColumnDescription: 'Isi kolom ini',
-  tableColumnAdd: 'Tambah kolom',
-  tableColumnRemove: 'Hapus',
-  tableRunAction: 'Jalankan ekstraksi tabel',
-  tableRunningTitle: 'Membaca seluruh bagian dokumen',
-  tableRunningHint: 'Proses ini lama. Anda boleh meninggalkan tab ini; ekstraksi tetap berjalan.',
-  tableProgress: (percent) => `${percent}% terbaca`,
-  tableRowCount: (n) => `${n} baris`,
-  tableCitationsLabel: 'Kutipan',
-  tableNothingFound: 'Tidak ada isi dokumen yang cocok dengan kolom ini.',
-  tableErrorTitle: 'Ekstraksi tabel gagal',
-  tableRetry: 'Jalankan lagi',
-  tableHistoryTitle: 'Ekstraksi tabel sebelumnya',
-  tableNewAction: 'Tabel baru',
-  tableStatusQueued: 'Antre',
-  tableStatusRunning: 'Berjalan',
-  tableStatusDone: 'Selesai',
-  tableStatusError: 'Gagal',
-  tableStatusCancelled: 'Dihentikan',
-  tableCancelAction: 'Hentikan',
-  tableCancelledNotice: 'Run ini Anda hentikan, jadi tidak ada baris. Kolomnya tetap disimpan.',
-  tableReadScope: (parts, chunks, total) =>
-    `Hanya membaca ${parts} bagian yang menjawab permintaan (${chunks} dari ${total} potongan):`,
-  tableReadAll: 'Baca seluruh dokumen',
-  tableExportAction: 'Ekspor XLSX',
-  tableDeleteAction: 'Hapus tabel',
-  tableDeleteConfirmTitle: 'Hapus ekstraksi tabel ini?',
-  tableDeleteConfirmBody: (request) => `"${request}" beserta semua barisnya akan dihapus. Tindakan ini tidak bisa dibatalkan.`,
-  tableRowDelete: 'Hapus baris',
 };
 
 const dictionaries = { en, id } as const;

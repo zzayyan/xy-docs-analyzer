@@ -1,4 +1,3 @@
-import re
 from collections.abc import Callable
 from functools import lru_cache
 from io import BytesIO
@@ -11,7 +10,7 @@ from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.utils.locks import pypdfium2_lock
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
-from docling_core.types.doc.document import DoclingDocument, PageItem, RefItem, SectionHeaderItem, TitleItem
+from docling_core.types.doc.document import DoclingDocument, PageItem
 from transformers import AutoTokenizer
 
 from app.config import settings
@@ -19,8 +18,6 @@ from app.config import settings
 PDF_BATCH_PAGES = 25
 TEXT_LAYER_CHARS = 100
 TEXT_LAYER_SAMPLE = 10
-# A Markdown table's header separator, e.g. |---|:--:|
-SEPARATOR = re.compile(r"[|:\- ]+")
 
 
 @lru_cache
@@ -110,58 +107,16 @@ def convert_document(path: str, on_progress: Callable[[int, int], None] | None =
     return DoclingDocument.concatenate(docs)
 
 
-def document_tables(doc: DoclingDocument) -> dict[str, dict]:
-    """Every table whole, as Markdown, by self_ref (docs/adr/0005)."""
-    tables = {}
-    for idx, item in enumerate(doc.tables):
-        # Drop the caption line (kept apart) and the column padding, which costs tokens on every read
-        exported = item.export_to_markdown(doc).splitlines()
-        lines = [" ".join(line.split()) for line in exported if line.lstrip().startswith("|")]
-        markdown = "\n".join(re.sub(r"-{3,}", "---", line) if SEPARATOR.fullmatch(line) else line for line in lines)
-        if not markdown:
-            continue
-        tables[item.self_ref] = {
-            "idx": idx, "markdown": markdown, "caption": item.caption_text(doc),
-            "pages": sorted({prov.page_no for prov in item.prov}),
-            "regions": regions_of([item], doc.pages),
-            # Read with the table, so never as prose too
-            "owns": {ref.cref for ref in [*item.captions, *item.footnotes, *item.children]},
-        }
-    return tables
-
-
-def prose_of(chunk, tables: dict[str, dict], chunker: HybridChunker, doc: DoclingDocument) -> str:
-    """A chunk's text without its tables. doc_items are plain DocItem copies, so each is resolved
-    against the document to serialize as what it is.
-
-    ponytail: a split paragraph's segments all point at the whole paragraph, so it may come back whole
-    and its rows twice (the merge pass folds them); slice the segment out if that bites."""
-    owned = set(tables)
-    for ref in (d.self_ref for d in chunk.meta.doc_items if d.self_ref in tables):
-        owned |= tables[ref]["owns"]
-    serializer = chunker.serializer_provider.get_serializer(doc=doc)
-    texts = []
-    for ref in dict.fromkeys(d.self_ref for d in chunk.meta.doc_items if d.self_ref not in owned):
-        item = RefItem(cref=ref).resolve(doc)
-        if not isinstance(item, TitleItem | SectionHeaderItem) and (text := serializer.serialize(item=item).text):
-            texts.append(text)
-    if not texts:
-        return ""
-    return chunker.contextualize(chunk=chunk.model_copy(update={"text": chunker.delim.join(texts)}))
-
-
 def convert(
     path: str, on_progress: Callable[[int, int], None] | None = None,
-) -> tuple[DoclingDocument, int, list[dict], list[dict]]:
+) -> tuple[DoclingDocument, int, list[dict]]:
     doc = convert_document(path, on_progress)
     tokens = tokenizer().count_tokens(doc.export_to_markdown())
-    tables = document_tables(doc)
 
     chunker = HybridChunker(tokenizer=tokenizer(), merge_peers=True)
     chunks = []
     for idx, chunk in enumerate(chunker.chunk(dl_doc=doc)):
         pages = sorted({prov.page_no for item in chunk.meta.doc_items for prov in item.prov})
-        table_refs = list(dict.fromkeys(d.self_ref for d in chunk.meta.doc_items if d.self_ref in tables))
         chunks.append({
             "idx": idx,
             # Prepends headings, which helps both embedding and answering
@@ -169,7 +124,5 @@ def convert(
             "pages": pages,
             "headings": chunk.meta.headings or [],
             "regions": regions_of(chunk.meta.doc_items, doc.pages),
-            "table_refs": [tables[ref]["idx"] for ref in table_refs],
-            "prose": prose_of(chunk, tables, chunker, doc) if table_refs else None,
         })
-    return doc, tokens, chunks, [{k: v for k, v in t.items() if k != "owns"} for t in tables.values()]
+    return doc, tokens, chunks

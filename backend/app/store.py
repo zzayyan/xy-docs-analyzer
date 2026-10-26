@@ -1,6 +1,5 @@
 """Cypher for the API's reads and deletes. Ingest writes live in app/ingest/."""
 import json
-import uuid
 
 from app.db import graph
 
@@ -17,11 +16,9 @@ GET_FILE = "MATCH (f:File {id: $id}) RETURN f {.*} AS file"
 DELETE_FILE_CASCADE = [
     "MATCH (f:File {id: $id}) DETACH DELETE f",
     "MATCH (n:Chunk {file_id: $id}) DETACH DELETE n",
-    "MATCH (n:DocTable {file_id: $id}) DETACH DELETE n",
     "MATCH (n:Section {file_id: $id}) DETACH DELETE n",
     "MATCH (n:__Entity__ {file_id: $id}) DETACH DELETE n",
     "MATCH (n:Turn {file_id: $id}) DETACH DELETE n",
-    "MATCH (n:TableExtraction {file_id: $id}) DETACH DELETE n",
 ]
 
 LIST_SECTIONS = """
@@ -38,51 +35,6 @@ MATCH (c:Chunk {file_id: $file_id})-[:IN_SECTION]->(:Section {id: $section_id, f
 RETURN c.id AS id, c.idx AS idx, c.text AS text, c.pages AS pages, c.headings AS headings
 ORDER BY c.idx
 """
-
-ALL_CHUNKS = """
-MATCH (c:Chunk {file_id: $file_id})
-RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings, c.regions AS regions,
-       c.table_ids AS table_ids, c.prose AS prose
-ORDER BY c.idx
-"""
-
-FIRST_CHUNKS = ALL_CHUNKS + "LIMIT $limit"
-
-DOC_TABLES = """
-MATCH (t:DocTable {file_id: $file_id})
-RETURN t.id AS id, t.idx AS idx, t.caption AS caption, t.markdown AS markdown, t.pages AS pages,
-       t.regions AS regions
-ORDER BY t.idx
-"""
-
-# JSON-encoded: a Neo4j property cannot hold a list of maps
-CREATE_TABLE_EXTRACTION = """
-MATCH (f:File {id: $file_id})
-CREATE (f)-[:HAS_TABLE]->(:TableExtraction {
-    id: $id, file_id: $file_id, request: $request, columns: $columns, rows: '[]', read_all: $read_all,
-    status: 'queued', progress: 0.0, created_at: timestamp(), updated_at: timestamp()
-})
-"""
-
-SET_TABLE_EXTRACTION = "MATCH (e:TableExtraction {id: $id}) SET e += $props, e.updated_at = timestamp()"
-
-# A cancel that lands while the run is merging rows stays cancelled
-FINISH_TABLE_EXTRACTION = """
-MATCH (e:TableExtraction {id: $id}) WHERE e.status = 'running'
-SET e += $props, e.updated_at = timestamp()
-"""
-
-# No rows: they can run to thousands of chunk quotes
-LIST_TABLE_EXTRACTIONS = """
-MATCH (e:TableExtraction {file_id: $file_id})
-RETURN e {.id, .request, .columns, .status, .progress, .error, .chunks_done, .chunks_total,
-          .created_at, .updated_at} AS extraction
-ORDER BY e.created_at DESC
-"""
-
-GET_TABLE_EXTRACTION = "MATCH (e:TableExtraction {id: $id, file_id: $file_id}) RETURN e {.*} AS extraction"
-
-DELETE_TABLE_EXTRACTION = "MATCH (e:TableExtraction {id: $id, file_id: $file_id}) DETACH DELETE e"
 
 LIST_TURNS = """
 MATCH (t:Turn {file_id: $file_id})
@@ -109,17 +61,14 @@ CREATE (f)-[:HAS_TURN]->(:Turn {
 CLEAR_TURNS = "MATCH (t:Turn {file_id: $file_id}) DETACH DELETE t"
 
 
-FAIL_INTERRUPTED = [
-    "MATCH (f:File) WHERE NOT f.status IN ['done', 'error'] SET f.status = 'error', f.error = $error, f.updated_at = timestamp()",
-    "MATCH (e:TableExtraction) WHERE e.status IN ['queued', 'running'] "
-    "SET e.status = 'error', e.error = $error, e.updated_at = timestamp()",
-]
+FAIL_INTERRUPTED = (
+    "MATCH (f:File) WHERE NOT f.status IN ['done', 'error'] SET f.status = 'error', f.error = $error, f.updated_at = timestamp()"
+)
 
 
 def fail_interrupted(error: str) -> None:
     """Startup only: before any background task has begun, nothing unfinished can still be running."""
-    for statement in FAIL_INTERRUPTED:
-        graph().query(statement, {"error": error})
+    graph().query(FAIL_INTERRUPTED, {"error": error})
 
 
 # Edges only between two top entities, so none points at an undrawn node
@@ -190,10 +139,9 @@ def delete_file(file_id: str) -> None:
         graph().query(statement, {"id": file_id})
 
 
-# Turns and Table Extractions stay: a retry is the same Document
+# Turns stay: a retry is the same Document
 RESET_INGEST = [
     "MATCH (n:Chunk {file_id: $id}) DETACH DELETE n",
-    "MATCH (n:DocTable {file_id: $id}) DETACH DELETE n",
     "MATCH (n:Section {file_id: $id}) DETACH DELETE n",
     "MATCH (n:__Entity__ {file_id: $id}) DETACH DELETE n",
     "MATCH (f:File {id: $id}) SET f.status = 'queued', f.progress = 0.0, f.error = null, f.step_done = 0, "
@@ -239,52 +187,3 @@ def save_turn(
 
 def clear_turns(file_id: str) -> None:
     graph().query(CLEAR_TURNS, {"file_id": file_id})
-
-
-def list_chunks(file_id: str, limit: int | None = None) -> list[dict]:
-    statement, params = (ALL_CHUNKS, {}) if limit is None else (FIRST_CHUNKS, {"limit": limit})
-    rows = graph().query(statement, {"file_id": file_id, **params})
-    return [{**row, "regions": json.loads(row.get("regions") or "[]")} for row in rows]
-
-
-def list_doc_tables(file_id: str) -> list[dict]:
-    rows = graph().query(DOC_TABLES, {"file_id": file_id})
-    return [{**row, "regions": json.loads(row["regions"])} for row in rows]
-
-
-def _table_extraction(row: dict) -> dict:
-    rows = json.loads(row.get("rows") or "[]")
-    # Rows saved before ids existed get their position
-    for i, r in enumerate(rows):
-        r.setdefault("id", str(i))
-    return {**row, "columns": json.loads(row["columns"]), "rows": rows}
-
-
-def create_table_extraction(file_id: str, request: str, columns: list[dict], read_all: bool = False) -> dict:
-    extraction_id = str(uuid.uuid4())
-    graph().query(CREATE_TABLE_EXTRACTION, {
-        "id": extraction_id, "file_id": file_id, "request": request, "columns": json.dumps(columns),
-        "read_all": read_all,
-    })
-    return get_table_extraction(file_id, extraction_id)
-
-
-def set_table_extraction(extraction_id: str, *, when_running: bool = False, **props) -> None:
-    if "rows" in props:
-        props["rows"] = json.dumps(props["rows"])
-    statement = FINISH_TABLE_EXTRACTION if when_running else SET_TABLE_EXTRACTION
-    graph().query(statement, {"id": extraction_id, "props": props})
-
-
-def list_table_extractions(file_id: str) -> list[dict]:
-    rows = graph().query(LIST_TABLE_EXTRACTIONS, {"file_id": file_id})
-    return [_table_extraction(row["extraction"]) for row in rows]
-
-
-def get_table_extraction(file_id: str, extraction_id: str) -> dict | None:
-    rows = graph().query(GET_TABLE_EXTRACTION, {"id": extraction_id, "file_id": file_id})
-    return _table_extraction(rows[0]["extraction"]) if rows else None
-
-
-def delete_table_extraction(file_id: str, extraction_id: str) -> None:
-    graph().query(DELETE_TABLE_EXTRACTION, {"id": extraction_id, "file_id": file_id})

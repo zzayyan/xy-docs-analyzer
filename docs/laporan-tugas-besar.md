@@ -36,8 +36,7 @@ menggabungkan keduanya:
 | Lintas bahasa | Bahasa dokumen dideteksi saat ingest. Pertanyaan diterjemahkan ke bahasa dokumen untuk pencarian, jawaban mengikuti bahasa pertanyaan. |
 | Outline dokumen | Dokumen panjang punya pohon bagian (section tree) beserta ringkasan tiap bagian. |
 | Knowledge graph | Entitas dan relasi dari dokumen panjang ditampilkan sebagai graph yang bisa dijelajahi. |
-| Table Extraction | Pengguna mendeskripsikan tabel yang diinginkan (misalnya "semua sanksi dan pasalnya"). Model membaca seluruh dokumen dan mengisi baris beserta sitasinya. Hasil bisa diekspor ke Excel. |
-| Pilihan model | Admin bisa mengganti model chat, model Table Extraction, dan model embedding dari halaman Settings. |
+| Pilihan model | Admin bisa mengganti model chat dan model embedding dari halaman Settings. |
 | Akun pengguna | Login dengan peran admin dan user biasa. |
 
 ## 4. Model open source yang dipakai
@@ -48,7 +47,6 @@ menggabungkan keduanya:
 | Alternatif lokal untuk peran di atas | **Qwen3 14B** | Ollama |
 | Embedding (1024 dimensi) dan tokenizer chunking | **BAAI/bge-m3** (MIT) | Ollama atau server OpenAI-compatible |
 | Konversi dokumen: layout, tabel, OCR | **Docling** (IBM, MIT) beserta model layout dan TableFormer-nya | Lokal, di dalam proses backend |
-| Table Extraction (opsional) | Model open weights mana pun di endpoint OpenAI-compatible, misalnya NVIDIA Nemotron | Kalau tidak diatur, memakai model chat dokumen |
 
 Penyedia model diatur lewat `backend/.env` (`LLM_PROVIDER`, `EMBED_PROVIDER`). Keduanya bisa `ollama`
 atau `openai` (untuk vLLM, OpenRouter, dan server OpenAI-compatible lainnya), dan bisa diatur terpisah.
@@ -70,16 +68,15 @@ Stack yang dipakai:
 
 | Komponen | Kode | Peran |
 |---|---|---|
-| Web UI | `frontend/src/` | Upload, chat dengan sitasi, viewer halaman asli, outline, graph, Table Extraction, Settings. Memanggil API dengan cookie sesi, jawaban dibaca lewat SSE. |
+| Web UI | `frontend/src/` | Upload, chat dengan sitasi, viewer halaman asli, outline, graph, Settings. Memanggil API dengan cookie sesi, jawaban dibaca lewat SSE. |
 | FastAPI | `backend/app/api.py` | Semua endpoint REST dan stream SSE. Setiap request melewati cek sesi (`auth.require_user`), endpoint Settings dan Users hanya untuk admin. |
 | Auth | `backend/app/auth.py` | Password di-hash dengan scrypt. Sesi berupa token acak di cookie HttpOnly, disimpan dalam bentuk hash di Neo4j, sehingga logout langsung memutus sesi. |
 | Ingest | `backend/app/ingest/` | Jalan di `BackgroundTasks`. Konversi PDF dikunci satu per satu karena Docling butuh memori besar. Progres tiap tahap disimpan di node `File`. |
 | LangGraph RAG | `backend/app/graph.py`, `backend/app/retrieval/` | Alur tanya-jawab (bagian 5.3). |
-| Table Extraction | `backend/app/table.py` | Memilih bagian dokumen yang relevan, mengekstrak baris per chunk atau per tabel, lalu menggabungkan baris duplikat. Jalan di background dan bisa dibatalkan. |
 | Klien model | `backend/app/models.py`, `backend/app/model_settings.py` | Membuat klien Ollama atau OpenAI-compatible. Model yang diganti dari Settings disimpan di Neo4j dan langsung berlaku tanpa restart. Ganti model embedding memicu re-index di background (`backend/app/reindex.py`). |
-| Neo4j 5.26 | `docker-compose.yml`, `backend/app/db.py` | Satu database untuk semua data: `File`, `Chunk` (embedding dan indeks fulltext), `Section`, `__Entity__`, `DocTable`, `TableExtraction`, `Turn` (riwayat chat), `User`, `Session`, dan `Meta` (pengaturan model). |
+| Neo4j 5.26 | `docker-compose.yml`, `backend/app/db.py` | Satu database untuk semua data: `File`, `Chunk` (embedding dan indeks fulltext), `Section`, `__Entity__`, `Turn` (riwayat chat), `User`, `Session`, dan `Meta` (pengaturan model). |
 | File asli | `backend/data/originals/` | File yang diunggah disimpan apa adanya. Halaman PDF dirender ke gambar dengan pypdfium2 untuk highlight sitasi. |
-| Model | Docling, bge-m3, Qwen, Table LLM | Lihat bagian 4. Docling berjalan di dalam proses backend, model lain diakses lewat HTTP. |
+| Model | Docling, bge-m3, Qwen | Lihat bagian 4. Docling berjalan di dalam proses backend, model lain diakses lewat HTTP. |
 
 ### 5.2 Alur ingest dokumen
 
@@ -131,10 +128,8 @@ Backend berjalan di `http://localhost:8000`. Dokumentasi interaktif (Swagger) te
 | `GET` | `/documents/{doc_id}/original/pages/{page_no}` | Gambar halaman asli untuk highlight sitasi |
 | `GET` | `/documents/{doc_id}/sections` | Section tree dokumen panjang |
 | `GET` | `/documents/{doc_id}/graph` | Knowledge graph dokumen panjang |
-| `POST` | `/documents/{doc_id}/tables` | Menjalankan Table Extraction |
-| `GET` | `/documents/{doc_id}/tables/{table_id}/export.xlsx` | Ekspor hasil Table Extraction ke Excel |
 | `POST` | `/auth/login`, `/auth/logout` | Masuk dan keluar, sesi disimpan di cookie HttpOnly |
-| `GET`, `PUT` | `/settings/models`, `/settings/embedding` | Mengganti model chat, Table Extraction, dan embedding (admin) |
+| `GET`, `PUT` | `/settings/models`, `/settings/embedding` | Mengganti model chat dan embedding (admin) |
 | `GET`, `POST`, `PATCH`, `DELETE` | `/users` | Mengelola akun pengguna (admin) |
 
 ## 7. Cara menjalankan

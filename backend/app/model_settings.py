@@ -9,13 +9,12 @@ from app.db import graph
 GROUPS = {
     "models": (
         "llm_provider", "llm_base_url", "llm_api_key", "llm_model", "llm_model_choices", "llm_reasoning_effort",
-        "table_llm_base_url", "table_llm_api_key", "table_llm_model",
     ),
     # Not 'embedding': that Meta key is the marker of what the stored vectors were made with (app/db.py)
     "embedding_endpoint": ("embed_provider", "embed_base_url", "embed_api_key", "embed_model", "embed_dim"),
 }
 FIELDS = tuple(field for fields in GROUPS.values() for field in fields)
-SECRETS = ("llm_api_key", "table_llm_api_key", "embed_api_key")
+SECRETS = ("llm_api_key", "embed_api_key")
 # Captured at import, before anything saved is applied: what a reset goes back to
 ENV = {field: getattr(settings, field) for field in FIELDS}
 
@@ -38,7 +37,6 @@ def apply(overrides: dict) -> None:
     # Neo4j stores no nulls, so "no reasoning_effort" is saved as ""
     settings.llm_reasoning_effort = settings.llm_reasoning_effort or None
     models._llm.cache_clear()
-    models.table_llm.cache_clear()
     models.embeddings.cache_clear()
 
 

@@ -1,4 +1,3 @@
-import io
 import json
 import mimetypes
 import re
@@ -15,20 +14,14 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, U
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from neo4j.exceptions import ConstraintError
-import openpyxl
-from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from pydantic import BaseModel
 
-from app import auth, model_settings, reindex, store, table
+from app import auth, model_settings, reindex, store
 from app.config import settings
 from app.graph import MAX_HISTORY_TURNS, to_citations, workflow
 from app.ingest.convert import page_count, render_page
 from app.ingest.pipeline import create_file, ingest, set_status
 from app.models import chat_model, embedding_model
-from app.table import (
-    Column, ProposedColumns, Stopped, SuggestedTables, document_context, propose_columns, suggest_tables,
-)
-from app.table import run as run_table
 
 READ_CHUNK = 1024 * 1024
 
@@ -107,9 +100,6 @@ class ModelSettings(BaseModel):
     llm_model: str
     llm_model_choices: str = ""
     llm_reasoning_effort: str | None = None
-    table_llm_base_url: str = ""
-    table_llm_api_key: str | None = None
-    table_llm_model: str = ""
 
 
 class ModelSettingsView(ModelSettings):
@@ -146,7 +136,7 @@ class EmbeddingSettingsView(BaseModel):
 
 
 class ModelTest(BaseModel):
-    slot: Literal["chat", "table", "embedding"]
+    slot: Literal["chat", "embedding"]
     provider: Provider = "openai"
     base_url: str
     api_key: str | None = None
@@ -196,17 +186,6 @@ class Document(BaseModel):
     page_count: int | None = None
 
 
-class ProposeRequest(BaseModel):
-    request: str
-
-
-class TableRequest(BaseModel):
-    request: str
-    columns: list[Column]
-    # Skip the scope pass and read every chunk
-    read_all: bool = False
-
-
 class Region(BaseModel):
     page: int
     l: float
@@ -245,29 +224,6 @@ class Chunk(BaseModel):
     text: str
     pages: list[int]
     headings: list[str]
-
-
-class Row(BaseModel):
-    id: str
-    values: dict[str, str]
-    citations: list[Citation]
-
-
-class TableExtraction(BaseModel):
-    id: str
-    request: str
-    columns: list[Column]
-    rows: list[Row]
-    status: str
-    progress: float
-    error: str | None = None
-    chunks_done: int | None = None
-    chunks_total: int | None = None
-    read_parts: list[str] | None = None
-    document_chunks: int | None = None
-    read_all: bool = False
-    created_at: int
-    updated_at: int
 
 
 class Turn(BaseModel):
@@ -471,19 +427,14 @@ def get_model_settings() -> dict:
 def put_model_settings(body: ModelSettings) -> dict:
     stored = model_settings.current()
     values = {k: v.strip() if isinstance(v, str) else v for k, v in body.model_dump().items()}
-    for field in ("llm_api_key", "table_llm_api_key"):
-        # A masked key echoed back is the stored key, never a new one
-        if values[field] is None or values[field].startswith(model_settings.MASK):
-            values[field] = stored[field]
+    # A masked key echoed back is the stored key, never a new one
+    if values["llm_api_key"] is None or values["llm_api_key"].startswith(model_settings.MASK):
+        values["llm_api_key"] = stored["llm_api_key"]
     values["llm_base_url"] = checked_url(values["llm_base_url"], "chat model")
     if not values["llm_model"]:
         raise HTTPException(status_code=400, detail="chat model: a model name is required")
     if values["llm_provider"] == "openai" and not values["llm_api_key"]:
         raise HTTPException(status_code=400, detail="chat model: an OpenAI-compatible server needs an API key")
-    if values["table_llm_model"]:
-        values["table_llm_base_url"] = checked_url(values["table_llm_base_url"], "table model")
-        if not values["table_llm_api_key"]:
-            raise HTTPException(status_code=400, detail="table model: an API key is required")
     model_settings.save("models", values)
     return model_settings_view()
 
@@ -501,15 +452,14 @@ TEST_TIMEOUT_S = 30
 def test_model(body: ModelTest) -> dict:
     key = body.api_key
     if key is None or key.startswith(model_settings.MASK):
-        key = model_settings.current()[{"chat": "llm_api_key", "table": "table_llm_api_key", "embedding": "embed_api_key"}[body.slot]]
-    provider = "openai" if body.slot == "table" else body.provider
+        key = model_settings.current()[{"chat": "llm_api_key", "embedding": "embed_api_key"}[body.slot]]
     started = time.monotonic()
     try:
         if body.slot == "embedding":
-            vector = embedding_model(provider, checked_url(body.base_url, "URL"), key, body.model.strip()).embed_query("OK")
+            vector = embedding_model(body.provider, checked_url(body.base_url, "URL"), key, body.model.strip()).embed_query("OK")
             return {"ok": True, "latency_ms": int((time.monotonic() - started) * 1000), "dim": len(vector)}
         client = chat_model(
-            provider, checked_url(body.base_url, "URL"), key, body.model.strip(),
+            body.provider, checked_url(body.base_url, "URL"), key, body.model.strip(),
             max_tokens=256, reasoning_effort=body.reasoning_effort or None, timeout=TEST_TIMEOUT_S,
         )
         reply = client.invoke("Reply with the single word OK.").text
@@ -668,170 +618,6 @@ def document_sections(doc_id: str) -> list[dict]:
 def document_section_chunks(doc_id: str, section_id: str) -> list[dict]:
     get_file(doc_id)
     return store.section_chunks(doc_id, section_id)
-
-
-def extract_table(
-    doc_id: str, table_id: str, request: str, columns: list[dict], model: str | None, read_all: bool = False,
-) -> None:
-    def progress(done: int, total: int) -> None:
-        store.set_table_extraction(table_id, progress=round(done / total, 3), chunks_done=done, chunks_total=total)
-
-    def cancelled() -> bool:
-        extraction = store.get_table_extraction(doc_id, table_id)
-        # Deleted counts as cancelled: nothing left to write the rows to
-        return extraction is None or extraction["status"] == "cancelled"
-
-    try:
-        # Tables are read whole, not chunk by chunk (docs/adr/0005)
-        tables = {t["id"]: t for t in store.list_doc_tables(doc_id)}
-        document = [
-            {**chunk, "tables": [tables[i] for i in chunk.get("table_ids") or [] if i in tables]}
-            for chunk in store.list_chunks(doc_id)
-        ]
-        # docs/adr/0004
-        chunks = document if read_all else table.scope(request, document, model)
-        store.set_table_extraction(
-            table_id, status="running", chunks_done=0, chunks_total=len(chunks),
-            read_parts=table.part_titles(chunks), document_chunks=len(document),
-        )
-        rows = run_table(chunks, columns, model, on_progress=progress, should_stop=cancelled, request=request)
-        store.set_table_extraction(
-            # Row ids are positions at finish time; deleting a row never renumbers the rest
-            table_id, status="done", progress=1.0, rows=[{**row, "id": str(i)} for i, row in enumerate(rows)],
-            when_running=True,
-        )
-    except Stopped:
-        store.set_table_extraction(table_id, status="cancelled")
-    except Exception as exc:
-        store.set_table_extraction(table_id, status="error", error=str(exc))
-
-
-IN_FLIGHT = ("queued", "running")
-
-
-def checked_columns(columns: list[Column]) -> list[dict]:
-    # Names key each row's values: a blank or repeated name would silently drop a column's cells
-    named = [{"name": c.name.strip(), "description": c.description.strip()} for c in columns]
-    names = [c["name"] for c in named]
-    if not names or not all(names):
-        raise HTTPException(status_code=400, detail="every column needs a name")
-    if len(set(names)) != len(names):
-        raise HTTPException(status_code=400, detail="column names must be unique")
-    return named
-
-
-def ready_document(doc_id: str) -> dict:
-    file = get_file(doc_id)
-    if file["status"] != "done":
-        raise HTTPException(status_code=409, detail=f"document is not ready (status: {file['status']})")
-    return file
-
-
-def table_context(doc_id: str) -> str:
-    return document_context(store.list_sections(doc_id), store.list_chunks(doc_id, limit=table.CONTEXT_CHUNKS))
-
-
-@app.post("/documents/{doc_id}/tables/propose", response_model=ProposedColumns)
-def propose_table_columns(doc_id: str, body: ProposeRequest) -> dict:
-    file = ready_document(doc_id)
-    return {"columns": propose_columns(body.request, file.get("llm_model"), context=table_context(doc_id))}
-
-
-@app.post("/documents/{doc_id}/tables/suggest", response_model=SuggestedTables)
-def suggest_document_tables(doc_id: str) -> dict:
-    # POST, not GET: an LLM call each time, so it runs only on request
-    file = ready_document(doc_id)
-    return {"tables": suggest_tables(table_context(doc_id), file.get("llm_model"))}
-
-
-@app.post("/documents/{doc_id}/tables", response_model=TableExtraction)
-def create_table_extraction(doc_id: str, body: TableRequest, background: BackgroundTasks) -> dict:
-    file = ready_document(doc_id)
-    columns = checked_columns(body.columns)
-    # One run per document: each holds a worker thread for minutes
-    if any(e["status"] in IN_FLIGHT for e in store.list_table_extractions(doc_id)):
-        raise HTTPException(status_code=409, detail="a table extraction is already running for this document")
-    extraction = store.create_table_extraction(doc_id, body.request, columns, read_all=body.read_all)
-    background.add_task(extract_table, doc_id, extraction["id"], body.request, columns, file.get("llm_model"), body.read_all)
-    return extraction
-
-
-@app.get("/documents/{doc_id}/tables", response_model=list[TableExtraction])
-def list_table_extractions(doc_id: str) -> list[dict]:
-    get_file(doc_id)
-    return store.list_table_extractions(doc_id)
-
-
-@app.get("/documents/{doc_id}/tables/{table_id}", response_model=TableExtraction)
-def document_table_extraction(doc_id: str, table_id: str) -> dict:
-    get_file(doc_id)
-    extraction = store.get_table_extraction(doc_id, table_id)
-    if extraction is None:
-        raise HTTPException(status_code=404, detail="table extraction not found")
-    return extraction
-
-
-@app.post("/documents/{doc_id}/tables/{table_id}/cancel", response_model=TableExtraction)
-def cancel_table_extraction(doc_id: str, table_id: str) -> dict:
-    extraction = document_table_extraction(doc_id, table_id)
-    if extraction["status"] not in IN_FLIGHT:
-        raise HTTPException(status_code=409, detail=f"table extraction is already {extraction['status']}")
-    store.set_table_extraction(table_id, status="cancelled")
-    return {**extraction, "status": "cancelled"}
-
-
-@app.delete("/documents/{doc_id}/tables/{table_id}", status_code=204)
-def delete_document_table_extraction(doc_id: str, table_id: str) -> None:
-    # Fine mid-run: extract_table counts a missing run as cancelled
-    document_table_extraction(doc_id, table_id)
-    store.delete_table_extraction(doc_id, table_id)
-
-
-@app.delete("/documents/{doc_id}/tables/{table_id}/rows/{row_id}", status_code=204)
-def delete_table_row(doc_id: str, table_id: str, row_id: str) -> None:
-    extraction = document_table_extraction(doc_id, table_id)
-    if extraction["status"] in IN_FLIGHT:
-        raise HTTPException(status_code=409, detail="the table extraction is still running")
-    rows = [row for row in extraction["rows"] if row["id"] != row_id]
-    if len(rows) == len(extraction["rows"]):
-        raise HTTPException(status_code=404, detail="row not found")
-    # ponytail: read-modify-write, two simultaneous deletes can lose one; edit in Cypher if that bites
-    store.set_table_extraction(table_id, rows=rows)
-
-
-XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-
-
-def cells(values: list) -> list:
-    # Control characters make openpyxl refuse the whole workbook
-    return [ILLEGAL_CHARACTERS_RE.sub("", v) if isinstance(v, str) else v for v in values]
-
-
-@app.get("/documents/{doc_id}/tables/{table_id}/export.xlsx")
-def export_table_extraction(doc_id: str, table_id: str) -> Response:
-    extraction = document_table_extraction(doc_id, table_id)
-    if extraction["status"] != "done":
-        raise HTTPException(status_code=409, detail=f"table extraction is {extraction['status']}, not done")
-    names = [column["name"] for column in extraction["columns"]]
-    workbook = openpyxl.Workbook()
-    sheet = workbook.active
-    sheet.append(cells([*names, "Pages"]))
-    for row in extraction["rows"]:
-        pages = sorted({page for citation in row["citations"] for page in citation["pages"]})
-        sheet.append(cells([*(row["values"].get(name, "") for name in names), ", ".join(map(str, pages)) or None]))
-    # Values come from the uploaded document: a cell reading "=HYPERLINK(...)" must stay text, not a formula
-    for sheet_row in sheet.iter_rows():
-        for cell in sheet_row:
-            if cell.data_type == "f":
-                cell.data_type = "s"
-    buffer = io.BytesIO()
-    workbook.save(buffer)
-    # Headers must be latin-1, and the request can be in any script
-    filename = " ".join(re.sub(r"[^A-Za-z0-9 _-]", " ", extraction["request"]).split())[:80] or "table"
-    return Response(
-        buffer.getvalue(), media_type=XLSX,
-        headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'},
-    )
 
 
 # ponytail: only the most mentioned entities, the rest via neighbour expansion; paginate or cluster if needed

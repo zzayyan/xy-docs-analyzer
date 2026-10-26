@@ -29,9 +29,6 @@ export interface ModelSettings {
   llm_model: string;
   llm_model_choices: string;
   llm_reasoning_effort: string | null;
-  table_llm_base_url: string;
-  table_llm_api_key: string | null;
-  table_llm_model: string;
 }
 
 export interface ModelSettingsView extends ModelSettings {
@@ -62,7 +59,7 @@ export interface EmbeddingSettingsView extends EmbeddingSettings {
 }
 
 export interface ModelTest {
-  slot: 'chat' | 'table' | 'embedding';
+  slot: 'chat' | 'embedding';
   provider: 'ollama' | 'openai';
   base_url: string;
   api_key: string | null;
@@ -123,7 +120,7 @@ export interface Citation {
   chunk_id: string;
   pages: number[];
   headings: string[];
-  source: 'vector' | 'tree' | 'kg' | 'kg_facts' | 'table';
+  source: 'vector' | 'tree' | 'kg' | 'kg_facts';
   text: string;
   regions: Region[];
 }
@@ -156,42 +153,6 @@ export interface Turn {
   mode: 'short' | 'long';
   complete: boolean;
   created_at: number;
-}
-
-export interface Column {
-  name: string;
-  description: string;
-}
-
-export interface Row {
-  id: string;
-  values: Record<string, string>;
-  citations: Citation[];
-}
-
-export interface SuggestedTable {
-  title: string;
-  request: string;
-  columns: Column[];
-}
-
-export type TableStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled';
-
-export interface TableExtraction {
-  id: string;
-  request: string;
-  columns: Column[];
-  rows: Row[];
-  status: TableStatus;
-  progress: number;
-  error: string | null;
-  chunks_done: number | null;
-  chunks_total: number | null;
-  read_parts: string[] | null;
-  document_chunks: number | null;
-  read_all: boolean;
-  created_at: number;
-  updated_at: number;
 }
 
 export interface GraphNode {
@@ -342,38 +303,6 @@ export const api = {
   listTurns: (id: string) => request<Turn[]>(`/documents/${id}/turns`),
 
   clearTurns: (id: string) => request<void>(`/documents/${id}/turns`, { method: 'DELETE' }),
-
-  proposeColumns: (docId: string, prompt: string) =>
-    request<{ columns: Column[] }>(`/documents/${docId}/tables/propose`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request: prompt }),
-    }),
-
-  suggestTables: (docId: string) =>
-    request<{ tables: SuggestedTable[] }>(`/documents/${docId}/tables/suggest`, { method: 'POST' }),
-
-  createTable: (docId: string, tableRequest: string, columns: Column[], readAll = false) =>
-    request<TableExtraction>(`/documents/${docId}/tables`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request: tableRequest, columns, read_all: readAll }),
-    }),
-
-  cancelTable: (docId: string, tableId: string) =>
-    request<TableExtraction>(`/documents/${docId}/tables/${tableId}/cancel`, { method: 'POST' }),
-
-  deleteTable: (docId: string, tableId: string) =>
-    request<void>(`/documents/${docId}/tables/${tableId}`, { method: 'DELETE' }),
-
-  deleteTableRow: (docId: string, tableId: string, rowId: string) =>
-    request<void>(`/documents/${docId}/tables/${tableId}/rows/${encodeURIComponent(rowId)}`, { method: 'DELETE' }),
-
-  tableExportUrl: (docId: string, tableId: string) => `${API_URL}/documents/${docId}/tables/${tableId}/export.xlsx`,
-
-  listTables: (docId: string) => request<TableExtraction[]>(`/documents/${docId}/tables`),
-
-  getTable: (docId: string, tableId: string) => request<TableExtraction>(`/documents/${docId}/tables/${tableId}`),
 
   graph: (docId: string) => request<GraphData>(`/documents/${docId}/graph`),
 
