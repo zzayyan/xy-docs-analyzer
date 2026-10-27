@@ -1,6 +1,6 @@
 # Docs Analyzer: RAG Dokumen dengan Model Open Source
 
-Tugas Besar Sertifikasi AI Super Class, track **Large Language Model (LLM)**.
+Tugas Besar Sertifikasi AI Super Class, track Large Language Model (LLM).
 
 - Penulis: Brillianta Zayyan Muhammad
 - Repositori: https://github.com/zzayyan/xy-docs-analyzer
@@ -18,8 +18,8 @@ untuk embedding, dan Docling untuk membaca layout dan OCR.
 ## 2. Masalah yang diselesaikan
 
 Dokumen panjang seperti regulasi, kontrak, laporan tahunan, dan manual sulit dicari dengan pencarian
-kata kunci biasa. Sebaliknya, chatbot LLM tanpa retrieval bisa mengarang jawaban. Docs Analyzer
-menggabungkan keduanya:
+kata kunci biasa, dan chatbot LLM tanpa retrieval bisa mengarang jawaban. Docs Analyzer mencari
+potongan dokumen yang relevan lebih dulu, lalu menjawab dari potongan itu:
 
 1. Jawaban hanya disusun dari potongan dokumen yang ditemukan (grounded). Kalau konteksnya tidak
    memuat jawaban, model diminta mengatakannya.
@@ -43,10 +43,10 @@ menggabungkan keduanya:
 
 | Peran | Model | Cara dijalankan |
 |---|---|---|
-| Menjawab, reformulasi query, ringkasan bagian, ekstraksi knowledge graph | **Qwen3.5-4B-AWQ** (Alibaba Qwen, Apache 2.0) | vLLM, endpoint OpenAI-compatible |
-| Alternatif lokal untuk peran di atas | **Qwen3 14B** | Ollama |
-| Embedding (1024 dimensi) dan tokenizer chunking | **BAAI/bge-m3** (MIT) | Ollama atau server OpenAI-compatible |
-| Konversi dokumen: layout, tabel, OCR | **Docling** (IBM, MIT) beserta model layout dan TableFormer-nya | Lokal, di dalam proses backend |
+| Menjawab, reformulasi query, ringkasan bagian, ekstraksi knowledge graph | Qwen3.5-4B-AWQ (Alibaba Qwen, Apache 2.0) | vLLM, endpoint OpenAI-compatible |
+| Alternatif lokal untuk peran di atas | Qwen3 14B | Ollama |
+| Embedding (1024 dimensi) dan tokenizer chunking | BAAI/bge-m3 (MIT) | Ollama atau server OpenAI-compatible |
+| Konversi dokumen: layout, tabel, OCR | Docling (IBM, MIT) beserta model layout dan TableFormer-nya | Lokal, di dalam proses backend |
 
 Penyedia model diatur lewat `backend/.env` (`LLM_PROVIDER`, `EMBED_PROVIDER`). Keduanya bisa `ollama`
 atau `openai` (untuk vLLM, OpenRouter, dan server OpenAI-compatible lainnya), dan bisa diatur terpisah.
@@ -56,11 +56,11 @@ Contoh konfigurasinya ada di `backend/.env.example`.
 
 Stack yang dipakai:
 
-- **Backend:** Python 3.12, FastAPI, LangGraph (orkestrasi alur RAG), LangChain (klien model)
-- **Ingest:** Docling (konversi PDF/DOCX dan OCR), HybridChunker
-- **Database:** Neo4j 5 untuk semua data: vektor, indeks fulltext, section tree, knowledge graph, dan
+- Backend: Python 3.12, FastAPI, LangGraph (orkestrasi alur RAG), LangChain (klien model)
+- Ingest: Docling (konversi PDF/DOCX dan OCR), HybridChunker
+- Database: Neo4j 5 untuk semua data: vektor, indeks fulltext, section tree, knowledge graph, dan
   riwayat percakapan
-- **Frontend:** React, TypeScript, Vite
+- Frontend: React, TypeScript, Vite
 
 ### 5.1 Arsitektur sistem
 
@@ -91,8 +91,8 @@ data) di bawah. Keduanya berbagi Neo4j, dan semua panggilan model lewat `models.
    teks) otomatis di-OCR. Keputusan OCR dibuat per batch 25 halaman, jadi PDF campuran (sebagian scan,
    sebagian teks digital) tetap terbaca utuh.
 3. **Chunking.** HybridChunker memecah dokumen menjadi chunk maksimal 512 token (dihitung dengan
-   tokenizer bge-m3). Setiap chunk menyimpan nomor halaman, heading induk, dan bounding box di halaman.
-   Bounding box inilah yang dipakai untuk highlight.
+   tokenizer bge-m3). Setiap chunk menyimpan nomor halaman, heading induk, dan bounding box di halaman
+   untuk highlight.
 4. **Embedding.** Setiap chunk di-embed dengan bge-m3, lalu disimpan ke Neo4j bersama indeks fulltext.
 5. **Khusus dokumen panjang (lebih dari 20.000 token):**
    - **Section tree.** Outline dibangun dari heading dokumen. Setiap bagian diringkas oleh LLM.
@@ -171,12 +171,12 @@ cd backend
 uv run pytest tests/ -q --ignore=tests/test_smoke.py --ignore=tests/test_models_live.py
 ```
 
-Hasil terakhir: **111 test lulus**. Semua test ini berjalan tanpa model, dan hanya satu
+Hasil terakhir: 111 test lulus. Semua test ini berjalan tanpa model, dan hanya satu
 (`test_users_and_sessions_in_neo4j`) yang membutuhkan Neo4j aktif.
 `tests/test_smoke.py` menjalankan alur ingest dan tanya-jawab end to end, sehingga membutuhkan Neo4j
 dan endpoint model yang aktif.
 
-Keputusan desain penting dicatat sebagai ADR di [`docs/adr/`](adr/).
+Keputusan desain dicatat sebagai ADR di [`docs/adr/`](adr/).
 
 ## 9. Keterbatasan
 
