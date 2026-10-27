@@ -66,6 +66,10 @@ Stack yang dipakai:
 
 ![Arsitektur sistem](img/arsitektur-sistem.png)
 
+Diagram dibaca dari kiri ke kanan: layar React, kelompok endpoint FastAPI (semuanya butuh sesi), modul
+backend, lalu penyimpanan dan model. Jalur ingest (menulis data) ada di atas, jalur tanya-jawab (membaca
+data) di bawah. Keduanya berbagi Neo4j, dan semua panggilan model lewat `models.py`.
+
 | Komponen | Kode | Peran |
 |---|---|---|
 | Web UI | `frontend/src/` | Upload, chat dengan sitasi, viewer halaman asli, outline, graph, Settings. Memanggil API dengan cookie sesi, jawaban dibaca lewat SSE. |
