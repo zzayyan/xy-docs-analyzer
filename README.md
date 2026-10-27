@@ -82,8 +82,10 @@ npx tsc -b && npm run lint && npm run build
   has to be re-uploaded.
 - **One PDF converts at a time.** Docling peaks at ~14 GB per 25-page batch, so a second
   upload stays `queued` until the first finishes converting.
-- **No auth.** Every document is readable and deletable by anyone who can reach the
-  API. Fine on localhost; don't bind `--host 0.0.0.0` without adding auth first.
+- **Documents are shared by every account.** Login is required, but any signed-in user can
+  read and delete every document; the admin role only gates Settings and Users. There is
+  no login rate limit, so keep it on a trusted network rather than binding `--host 0.0.0.0`
+  on the open internet.
 - Ingest throughput is roughly 10-20 seconds per PDF page end to end (Docling
   conversion is most of that); `MAX_UPLOAD_MB` and `MAX_PAGES` in `backend/.env`
   bound how long an upload can make someone wait.
