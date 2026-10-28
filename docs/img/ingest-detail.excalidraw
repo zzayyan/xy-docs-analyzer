@@ -27,7 +27,7 @@
 {"type":"text","id":"c1_t","x":40,"y":175,"width":340,"height":33,"text":"1 · UPLOAD","fontSize":26,"fontFamily":3,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e40af","lineHeight":1.25},
 {"type":"text","id":"c1_s","x":40,"y":210,"width":340,"height":25,"text":"POST /documents","fontSize":20,"fontFamily":3,"textAlign":"left","verticalAlign":"top","strokeColor":"#3b82f6","lineHeight":1.25},
 {"type":"ellipse","id":"c1_in","x":60,"y":255,"width":300,"height":100,"strokeColor":"#c2410c","backgroundColor":"#fed7aa","fillStyle":"solid","strokeWidth":2,"roughness":0},
-{"type":"text","id":"c1_in_t","x":60,"y":290,"width":300,"height":30,"text":"PDF / DOCX","fontSize":24,"fontFamily":3,"textAlign":"center","verticalAlign":"top","strokeColor":"#374151","lineHeight":1.25},
+{"type":"text","id":"c1_in_t","x":60,"y":290,"width":300,"height":30,"text":"9 format dokumen","fontSize":24,"fontFamily":3,"textAlign":"center","verticalAlign":"top","strokeColor":"#374151","lineHeight":1.25},
 {"type":"arrow","id":"c1_a_save","x":210,"y":357,"width":0,"height":58,"points":[[0,0],[0,58]],"strokeColor":"#1e3a5f","strokeWidth":2,"roughness":0,"endArrowhead":"arrow"},
 {"type":"text","id":"c1_save_t","x":222,"y":372,"width":120,"height":23,"text":"simpan","fontSize":18,"fontFamily":3,"textAlign":"left","verticalAlign":"top","strokeColor":"#64748b","lineHeight":1.25},
 {"type":"rectangle","id":"c1_orig","x":60,"y":418,"width":300,"height":64,"strokeColor":"#1e3a5f","backgroundColor":"#93c5fd","fillStyle":"solid","strokeWidth":2,"roughness":0,"roundness":{"type":3}},
