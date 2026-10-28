@@ -7,9 +7,11 @@ interface UploadButtonProps {
   uploading: boolean;
   variant?: 'primary' | 'secondary';
   size?: 'sm' | 'md';
+  /** Extensions the file picker offers, e.g. ".pdf,.docx" */
+  accept?: string;
 }
 
-export function UploadButton({ onFile, uploading, variant = 'primary', size = 'sm' }: UploadButtonProps) {
+export function UploadButton({ onFile, uploading, variant = 'primary', size = 'sm', accept }: UploadButtonProps) {
   const { t } = useLang();
   const input = useRef<HTMLInputElement>(null);
 
@@ -18,6 +20,7 @@ export function UploadButton({ onFile, uploading, variant = 'primary', size = 's
       <input
         ref={input}
         type="file"
+        accept={accept}
         hidden
         onChange={(e) => {
           const file = e.target.files?.[0];

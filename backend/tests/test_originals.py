@@ -72,14 +72,6 @@ def test_pdf_original_opens_inline(ingested):
     assert response.headers["content-disposition"].startswith("inline")
 
 
-def test_original_without_extension_is_found_and_deleted(ingested):
-    doc_id = upload("README", b"plain", "text/plain")
-    assert client.get(f"/documents/{doc_id}").json()["has_original"] is True
-
-    assert client.delete(f"/documents/{doc_id}").status_code == 204
-    assert list((settings.data_dir / "originals").iterdir()) == []
-
-
 def test_original_is_404_for_unknown_document(ingested):
     assert client.get("/documents/nope/original").status_code == 404
 

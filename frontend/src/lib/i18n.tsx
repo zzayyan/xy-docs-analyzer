@@ -85,8 +85,9 @@ export interface Dict {
 
   uploadButton: string;
   uploadUploading: string;
-  uploadLimitsCaption: (mb: number, pages: number) => string;
+  uploadLimitsCaption: (mb: number, pages: number, formats: string) => string;
   uploadLimitsShort: (mb: number, pages: number) => string;
+  uploadFormats: (formats: string) => string;
   uploadLimitsUnavailable: string;
 
   statusQueued: string;
@@ -284,8 +285,9 @@ const en: Dict = {
 
   uploadButton: 'Upload',
   uploadUploading: 'Uploading…',
-  uploadLimitsCaption: (mb, pages) => `Up to ${mb} MB. PDFs up to ${pages} pages.`,
+  uploadLimitsCaption: (mb, pages, formats) => `${formats}. Up to ${mb} MB; PDFs up to ${pages} pages.`,
   uploadLimitsShort: (mb, pages) => `${mb} MB, ${pages} PDF pages max`,
+  uploadFormats: (formats) => `Supported formats: ${formats}`,
   uploadLimitsUnavailable: 'API not reachable',
 
   statusQueued: 'Queued',
@@ -487,8 +489,9 @@ const id: Dict = {
 
   uploadButton: 'Unggah',
   uploadUploading: 'Mengunggah…',
-  uploadLimitsCaption: (mb, pages) => `Maksimal ${mb} MB. PDF maksimal ${pages} halaman.`,
+  uploadLimitsCaption: (mb, pages, formats) => `${formats}. Maksimal ${mb} MB; PDF maksimal ${pages} halaman.`,
   uploadLimitsShort: (mb, pages) => `Maks. ${mb} MB, ${pages} halaman PDF`,
+  uploadFormats: (formats) => `Format yang didukung: ${formats}`,
   uploadLimitsUnavailable: 'API tidak dapat dijangkau',
 
   statusQueued: 'Menunggu',

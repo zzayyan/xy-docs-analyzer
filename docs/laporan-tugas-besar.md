@@ -8,7 +8,7 @@ Tugas Besar Sertifikasi AI Super Class, track Large Language Model (LLM).
 ## 1. Ringkasan
 
 Docs Analyzer adalah aplikasi Retrieval-Augmented Generation (RAG) untuk dokumen. Pengguna mengunggah
-PDF atau DOCX, lalu bertanya tentang isinya dalam Bahasa Indonesia atau Inggris. Setiap jawaban
+dokumen (PDF, DOCX, PPTX, XLSX, CSV, HTML, Markdown, atau gambar PNG/JPG), lalu bertanya tentang isinya dalam Bahasa Indonesia atau Inggris. Setiap jawaban
 menyertakan sitasi bernomor `[n]`. Saat sitasi diklik, halaman asli dokumen terbuka dengan bagian yang
 dikutip ditandai (highlight), sehingga jawaban bisa diperiksa langsung ke sumbernya.
 
@@ -57,7 +57,7 @@ Contoh konfigurasinya ada di `backend/.env.example`.
 Stack yang dipakai:
 
 - Backend: Python 3.12, FastAPI, LangGraph (orkestrasi alur RAG), LangChain (klien model)
-- Ingest: Docling (konversi PDF/DOCX dan OCR), HybridChunker
+- Ingest: Docling (konversi dokumen dan OCR), HybridChunker
 - Database: Neo4j 5 untuk semua data: vektor, indeks fulltext, section tree, knowledge graph, dan
   riwayat percakapan
 - Frontend: React, TypeScript, Vite
@@ -171,7 +171,7 @@ cd backend
 uv run pytest tests/ -q --ignore=tests/test_smoke.py --ignore=tests/test_models_live.py
 ```
 
-Hasil terakhir: 111 test lulus. Semua test ini berjalan tanpa model, dan hanya satu
+Hasil terakhir: 123 test lulus. Semua test ini berjalan tanpa endpoint LLM atau embedding, dan hanya satu
 (`test_users_and_sessions_in_neo4j`) yang membutuhkan Neo4j aktif.
 `tests/test_smoke.py` menjalankan alur ingest dan tanya-jawab end to end, sehingga membutuhkan Neo4j
 dan endpoint model yang aktif.
@@ -182,7 +182,10 @@ Keputusan desain dicatat sebagai ADR di [`docs/adr/`](adr/).
 
 - Konversi PDF memakan waktu sekitar 10 sampai 20 detik per halaman, dan hanya satu PDF yang
   dikonversi pada satu waktu karena Docling membutuhkan memori besar.
-- Upload dibatasi `MAX_UPLOAD_MB` (default 100 MB) dan `MAX_PAGES` (default 200 halaman).
+- Upload dibatasi `MAX_UPLOAD_MB` (default 100 MB) dan `MAX_PAGES` (default 200 halaman). Format di luar
+  daftar yang didukung ditolak saat upload.
+- Hanya PDF yang punya viewer halaman asli dengan highlight. Untuk format lain, sitasi menampilkan teks
+  yang dikutip.
 - Model kecil seperti Qwen3.5-4B cepat, tetapi kadang kurang tepat untuk pertanyaan yang memerlukan
   penalaran panjang. Model bisa diganti dari Settings tanpa mengubah kode.
 - Mengganti model embedding mengharuskan semua dokumen di-index ulang, karena vektor dari model yang

@@ -78,6 +78,15 @@ export interface ModelTestResult {
 export interface Limits {
   max_upload_mb: number;
   max_pages: number;
+  /** Accepted extensions, e.g. ".pdf" */
+  formats: string[];
+}
+
+// .htm and .jpeg are spellings of formats already listed
+const FORMAT_NAMES: Record<string, string> = { '.htm': 'HTML', '.jpeg': 'JPG', '.md': 'Markdown' };
+
+export function formatNames(formats: string[]): string {
+  return [...new Set(formats.map((f) => FORMAT_NAMES[f] ?? f.slice(1).toUpperCase()))].join(', ');
 }
 
 export interface ModelsInfo {

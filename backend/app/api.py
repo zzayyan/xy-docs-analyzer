@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from app import auth, model_settings, reindex, store
 from app.config import settings
 from app.graph import MAX_HISTORY_TURNS, to_citations, workflow
-from app.ingest.convert import page_count, render_page
+from app.ingest.convert import SUPPORTED_FORMATS, page_count, render_page
 from app.ingest.pipeline import create_file, ingest, set_status
 from app.models import chat_model, embedding_model
 
@@ -155,6 +155,7 @@ class ModelTestResult(BaseModel):
 class Limits(BaseModel):
     max_upload_mb: int
     max_pages: int
+    formats: list[str]
 
 
 class Models(BaseModel):
@@ -392,6 +393,12 @@ def save_upload(file: UploadFile) -> str:
 @app.post("/documents", response_model=Upload)
 def upload_document(file: UploadFile, background: BackgroundTasks) -> dict:
     no_reindex_running()
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in SUPPORTED_FORMATS:
+        raise HTTPException(
+            status_code=415,
+            detail=f"unsupported format {suffix or '(no extension)'}; supported: {', '.join(SUPPORTED_FORMATS)}",
+        )
     path = save_upload(file)
     # Page cap is PDF-only: page_count reads PDFs only
     if path.lower().endswith(".pdf"):
@@ -545,7 +552,7 @@ def no_reindex_running() -> None:
 
 @app.get("/limits", response_model=Limits)
 def limits() -> dict:
-    return {"max_upload_mb": settings.max_upload_mb, "max_pages": settings.max_pages}
+    return {"max_upload_mb": settings.max_upload_mb, "max_pages": settings.max_pages, "formats": list(SUPPORTED_FORMATS)}
 
 
 @app.get("/models", response_model=Models)

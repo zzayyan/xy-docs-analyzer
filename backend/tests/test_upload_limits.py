@@ -39,7 +39,21 @@ def test_pdf_over_the_page_limit_is_refused(monkeypatch, tmp_path):
 def test_limits_endpoint_reports_the_active_caps(monkeypatch):
     monkeypatch.setattr(settings, "max_upload_mb", 7)
     monkeypatch.setattr(settings, "max_pages", 9)
-    assert client.get("/limits").json() == {"max_upload_mb": 7, "max_pages": 9}
+    assert client.get("/limits").json() == {
+        "max_upload_mb": 7,
+        "max_pages": 9,
+        "formats": [".pdf", ".docx", ".pptx", ".xlsx", ".csv", ".html", ".htm", ".md", ".png", ".jpg", ".jpeg"],
+    }
+
+
+@pytest.mark.parametrize("name", ["archive.zip", "setup.exe", "notes.adoc", "no-extension"])
+def test_a_format_outside_the_supported_list_is_refused_and_not_kept(monkeypatch, tmp_path, name):
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    response = client.post("/documents", files={"file": (name, b"some bytes", "application/octet-stream")})
+    assert response.status_code == 415
+    detail = response.json()["detail"]
+    assert ".pdf" in detail and ".pptx" in detail and ".xlsx" in detail, "the message lists what is supported"
+    assert list(tmp_path.iterdir()) == [], "nothing is written to disk"
 
 
 def test_a_file_named_pdf_that_is_not_one_is_refused_and_not_kept(monkeypatch, tmp_path):

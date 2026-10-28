@@ -12,6 +12,19 @@ Stack: FastAPI + LangGraph on the backend, Docling for ingest, Neo4j for storage
 frontend styled with the XY Intelligence design system. LLM and embeddings each point
 at Ollama or any OpenAI-compatible endpoint (vLLM, OpenRouter, OpenAI) independently.
 
+## Supported formats
+
+PDF, DOCX, PPTX, XLSX, CSV, HTML, Markdown, PNG and JPG (`SUPPORTED_FORMATS` in
+`backend/app/ingest/convert.py`). Any other file is refused at upload with a 415, and `GET /limits`
+returns the list the upload button offers.
+
+- Only PDFs get the per-batch OCR decision, the `MAX_PAGES` cap, and the original-page viewer
+  with highlights. For every other format a citation shows the cited text.
+- Pictures are read by OCR. Each PPTX slide becomes its own chunk, with the slide number as its
+  page.
+- Spreadsheet rows become sentences, so asking for one value works, but totals or averages over
+  many rows do not yet.
+
 ## Run it
 
 Three processes, three terminals.

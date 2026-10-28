@@ -18,11 +18,29 @@ from app.config import settings
 PDF_BATCH_PAGES = 25
 TEXT_LAYER_CHARS = 100
 
+# Docling reads more formats; these are the ones the app accepts and tests
+SUPPORTED_FORMATS = {
+    ".pdf": InputFormat.PDF,
+    ".docx": InputFormat.DOCX,
+    ".pptx": InputFormat.PPTX,
+    ".xlsx": InputFormat.XLSX,
+    ".csv": InputFormat.CSV,
+    ".html": InputFormat.HTML,
+    ".htm": InputFormat.HTML,
+    ".md": InputFormat.MD,
+    ".png": InputFormat.IMAGE,
+    ".jpg": InputFormat.IMAGE,
+    ".jpeg": InputFormat.IMAGE,
+}
+
 
 @lru_cache
 def converter(ocr: bool = True) -> DocumentConverter:
     options = PdfPipelineOptions(do_ocr=ocr)
-    return DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)})
+    return DocumentConverter(
+        allowed_formats=list(set(SUPPORTED_FORMATS.values())),
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)},
+    )
 
 
 @lru_cache

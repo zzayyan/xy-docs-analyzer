@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Logo } from '../design-system';
 import { LanguageSwitch } from './LanguageSwitch';
 import { UploadButton } from './UploadButton';
-import { api, isInFlight, type Document, type User } from '../lib/api';
+import { api, formatNames, isInFlight, type Document, type User } from '../lib/api';
 import { formatRelative } from '../lib/format';
 import { statusLabel } from '../lib/status';
 import { useFileDrop } from '../lib/useFileDrop';
@@ -59,7 +59,7 @@ export function DocumentRail({ activeId, onUpload, uploading, onToggle, user, on
               <span style={{ marginLeft: 6, fontWeight: 'var(--fw-regular)', color: 'var(--text-muted)' }}>{documents.length}</span>
             )}
           </span>
-          <UploadButton onFile={onUpload} uploading={uploading} variant="secondary" />
+          <UploadButton onFile={onUpload} uploading={uploading} variant="secondary" accept={limitsQuery.data?.formats.join(',')} />
         </div>
 
         <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, paddingBottom: 12 }}>
@@ -95,7 +95,10 @@ export function DocumentRail({ activeId, onUpload, uploading, onToggle, user, on
             borderTop: 'var(--stroke-hairline) solid var(--border-subtle)',
           }}
         >
-          <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--text-muted)' }}>
+          <span
+            style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--text-muted)' }}
+            title={limitsQuery.data && t.uploadFormats(formatNames(limitsQuery.data.formats))}
+          >
             {drop.active
               ? t.dropActive
               : limitsQuery.data

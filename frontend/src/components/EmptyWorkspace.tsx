@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Logo } from '../design-system';
 import { UploadButton } from './UploadButton';
-import { api } from '../lib/api';
+import { api, formatNames } from '../lib/api';
 import { useFileDrop } from '../lib/useFileDrop';
 import { useLang } from '../lib/i18n';
 
@@ -36,10 +36,10 @@ export function EmptyWorkspace({ onUpload, uploading }: { onUpload: (file: File)
             <p style={{ margin: 0, lineHeight: 'var(--lh-body)', color: 'var(--text-card-body)' }}>{t.emptyBody}</p>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-            <UploadButton onFile={onUpload} uploading={uploading} size="md" />
+            <UploadButton onFile={onUpload} uploading={uploading} size="md" accept={limitsQuery.data?.formats.join(',')} />
             {limitsQuery.data && (
               <span style={{ fontSize: 'var(--fs-ui-xs)', color: 'var(--text-muted)' }}>
-                {t.uploadLimitsCaption(limitsQuery.data.max_upload_mb, limitsQuery.data.max_pages)}
+                {t.uploadLimitsCaption(limitsQuery.data.max_upload_mb, limitsQuery.data.max_pages, formatNames(limitsQuery.data.formats))}
               </span>
             )}
           </div>
