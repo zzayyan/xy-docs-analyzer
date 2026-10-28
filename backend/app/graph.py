@@ -148,6 +148,7 @@ def to_citations(contexts: list[dict]) -> list[dict]:
             "pages": c["pages"],
             "headings": c.get("headings") or [],
             "regions": c.get("regions") or [],
+            "refs": c.get("refs") or [],
             "source": c["source"],
             "text": c["text"],
         }

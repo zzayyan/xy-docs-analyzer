@@ -9,8 +9,8 @@ Tugas Besar Sertifikasi AI Super Class, track Large Language Model (LLM).
 
 Docs Analyzer adalah aplikasi Retrieval-Augmented Generation (RAG) untuk dokumen. Pengguna mengunggah
 dokumen (PDF, DOCX, PPTX, XLSX, CSV, HTML, Markdown, atau gambar PNG/JPG), lalu bertanya tentang isinya dalam Bahasa Indonesia atau Inggris. Setiap jawaban
-menyertakan sitasi bernomor `[n]`. Saat sitasi diklik, halaman asli dokumen terbuka dengan bagian yang
-dikutip ditandai (highlight), sehingga jawaban bisa diperiksa langsung ke sumbernya.
+menyertakan sitasi bernomor `[n]`. Saat sitasi diklik, bagian yang dikutip ditandai (highlight): di halaman
+asli untuk PDF dan gambar, di teks dokumen untuk format lain. Jawaban bisa diperiksa langsung ke sumbernya.
 
 Seluruh model di pipeline adalah model open source atau open weights: Qwen untuk menjawab, BAAI/bge-m3
 untuk embedding, dan Docling untuk membaca layout dan OCR.
@@ -31,7 +31,7 @@ potongan dokumen yang relevan lebih dulu, lalu menjawab dari potongan itu:
 
 | Fitur | Keterangan |
 |---|---|
-| Tanya-jawab dengan sitasi | Jawaban di-stream token per token (SSE). Sitasi `[n]` membuka halaman asli dengan highlight. |
+| Tanya-jawab dengan sitasi | Jawaban di-stream token per token (SSE). Sitasi `[n]` membuka bagian yang dikutip dengan highlight: halaman asli untuk PDF dan gambar, teks dokumen (paragraf, kartu slide, atau baris tabel) untuk format lain. |
 | Percakapan lanjutan | Pertanyaan seperti "jelaskan poin kedua" diubah menjadi query mandiri memakai riwayat percakapan. |
 | Lintas bahasa | Bahasa dokumen dideteksi saat ingest. Pertanyaan diterjemahkan ke bahasa dokumen untuk pencarian, jawaban mengikuti bahasa pertanyaan. |
 | Outline dokumen | Dokumen panjang punya pohon bagian (section tree) beserta ringkasan tiap bagian. |
@@ -72,14 +72,15 @@ data) di bawah. Keduanya berbagi Neo4j, dan semua panggilan model lewat `models.
 
 | Komponen | Kode | Peran |
 |---|---|---|
-| Web UI | `frontend/src/` | Upload, chat dengan sitasi, viewer halaman asli, outline, graph, Settings. Memanggil API dengan cookie sesi, jawaban dibaca lewat SSE. |
+| Web UI | `frontend/src/` | Upload, chat dengan sitasi, viewer dokumen, outline, graph, Settings. Memanggil API dengan cookie sesi, jawaban dibaca lewat SSE. |
 | FastAPI | `backend/app/api.py` | Semua endpoint REST dan stream SSE. Setiap request melewati cek sesi (`auth.require_user`), endpoint Settings dan Users hanya untuk admin. |
 | Auth | `backend/app/auth.py` | Password di-hash dengan scrypt. Sesi berupa token acak di cookie HttpOnly, disimpan dalam bentuk hash di Neo4j, sehingga logout langsung memutus sesi. |
 | Ingest | `backend/app/ingest/` | Jalan di `BackgroundTasks`. Konversi PDF dikunci satu per satu karena Docling butuh memori besar. Progres tiap tahap disimpan di node `File`. |
 | LangGraph RAG | `backend/app/graph.py`, `backend/app/retrieval/` | Alur tanya-jawab (bagian 5.3). |
 | Klien model | `backend/app/models.py`, `backend/app/model_settings.py` | Membuat klien Ollama atau OpenAI-compatible. Model yang diganti dari Settings disimpan di Neo4j dan langsung berlaku tanpa restart. Ganti model embedding memicu re-index di background (`backend/app/reindex.py`). |
 | Neo4j 5.26 | `docker-compose.yml`, `backend/app/db.py` | Satu database untuk semua data: `File`, `Chunk` (embedding dan indeks fulltext), `Section`, `__Entity__`, `Turn` (riwayat chat), `User`, `Session`, dan `Meta` (pengaturan model). |
-| File asli | `backend/data/originals/` | File yang diunggah disimpan apa adanya. Halaman PDF dirender ke gambar dengan pypdfium2 untuk highlight sitasi. |
+| File asli | `backend/data/originals/` | File yang diunggah disimpan apa adanya. Halaman PDF dirender ke gambar dengan pypdfium2 untuk highlight sitasi, gambar PNG/JPG disajikan apa adanya. |
+| Hasil konversi | `backend/data/docling/` | DoclingDocument tiap dokumen disimpan sebagai JSON, supaya viewer format selain PDF dan gambar bisa menampilkan dokumen tanpa konversi ulang. |
 | Model | Docling, bge-m3, Qwen | Lihat bagian 4. Docling berjalan di dalam proses backend, model lain diakses lewat HTTP. |
 
 ### 5.2 Alur ingest dokumen
@@ -91,8 +92,9 @@ data) di bawah. Keduanya berbagi Neo4j, dan semua panggilan model lewat `models.
    teks) otomatis di-OCR. Keputusan OCR dibuat per batch 25 halaman, jadi PDF campuran (sebagian scan,
    sebagian teks digital) tetap terbaca utuh.
 3. **Chunking.** HybridChunker memecah dokumen menjadi chunk maksimal 512 token (dihitung dengan
-   tokenizer bge-m3). Setiap chunk menyimpan nomor halaman, heading induk, dan bounding box di halaman
-   untuk highlight.
+   tokenizer bge-m3). Setiap chunk menyimpan nomor halaman, heading induk, bounding box di halaman, dan ref
+   item Docling (paragraf, baris slide, atau baris tabel) untuk highlight. Hasil konversi disimpan sebagai
+   JSON untuk viewer.
 4. **Embedding.** Setiap chunk di-embed dengan bge-m3, lalu disimpan ke Neo4j bersama indeks fulltext.
 5. **Khusus dokumen panjang (lebih dari 20.000 token):**
    - **Section tree.** Outline dibangun dari heading dokumen. Setiap bagian diringkas oleh LLM.
@@ -130,7 +132,8 @@ Backend berjalan di `http://localhost:8000`. Dokumentasi interaktif (Swagger) te
 | `POST` | `/documents` | Upload dokumen dan mulai ingest di background |
 | `GET` | `/documents/{doc_id}` | Status dan progres ingest |
 | `GET` | `/chat/stream?doc_id=...&question=...` | Tanya-jawab, respons berupa stream SSE (`citations`, `token`, `done`) |
-| `GET` | `/documents/{doc_id}/original/pages/{page_no}` | Gambar halaman asli untuk highlight sitasi |
+| `GET` | `/documents/{doc_id}/original/pages/{page_no}` | Gambar halaman asli (PDF atau gambar) untuk highlight sitasi |
+| `GET` | `/documents/{doc_id}/view` | Dokumen hasil konversi sebagai blok teks, untuk viewer format selain PDF dan gambar |
 | `GET` | `/documents/{doc_id}/sections` | Section tree dokumen panjang |
 | `GET` | `/documents/{doc_id}/graph` | Knowledge graph dokumen panjang |
 | `POST` | `/auth/login`, `/auth/logout` | Masuk dan keluar, sesi disimpan di cookie HttpOnly |
@@ -171,7 +174,7 @@ cd backend
 uv run pytest tests/ -q --ignore=tests/test_smoke.py --ignore=tests/test_models_live.py
 ```
 
-Hasil terakhir: 123 test lulus. Semua test ini berjalan tanpa endpoint LLM atau embedding, dan hanya satu
+Hasil terakhir: 133 test lulus. Semua test ini berjalan tanpa endpoint LLM atau embedding, dan hanya satu
 (`test_users_and_sessions_in_neo4j`) yang membutuhkan Neo4j aktif.
 `tests/test_smoke.py` menjalankan alur ingest dan tanya-jawab end to end, sehingga membutuhkan Neo4j
 dan endpoint model yang aktif.
@@ -184,8 +187,9 @@ Keputusan desain dicatat sebagai ADR di [`docs/adr/`](adr/).
   dikonversi pada satu waktu karena Docling membutuhkan memori besar.
 - Upload dibatasi `MAX_UPLOAD_MB` (default 100 MB) dan `MAX_PAGES` (default 200 halaman). Format di luar
   daftar yang didukung ditolak saat upload.
-- Hanya PDF yang punya viewer halaman asli dengan highlight. Untuk format lain, sitasi menampilkan teks
-  yang dikutip.
+- Viewer untuk format selain PDF dan gambar menampilkan teks hasil konversi, bukan tampilan asli. Styling,
+  gambar di dalam dokumen, dan link tidak ikut tampil, dan PPTX tampil sebagai kartu slide berisi teks.
+  Dokumen yang di-ingest sebelum hasil konversi disimpan hanya menampilkan teks yang dikutip.
 - Model kecil seperti Qwen3.5-4B cepat, tetapi kadang kurang tepat untuk pertanyaan yang memerlukan
   penalaran panjang. Model bisa diganti dari Settings tanpa mengubah kode.
 - Mengganti model embedding mengharuskan semua dokumen di-index ulang, karena vektor dari model yang

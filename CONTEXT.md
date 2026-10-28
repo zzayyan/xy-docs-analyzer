@@ -15,6 +15,11 @@ _Avoid_: File, upload, doc
 The uploaded file exactly as received, kept so a citation can open the real page.
 _Avoid_: Source file, raw file
 
+**Converted Document**:
+Docling's reading of the Original (headings, paragraphs, slides, tables), kept so a document without
+pages can be shown with its cited passages marked.
+_Avoid_: Docling JSON, parsed document
+
 **Short Document**:
 A document small enough that questions are answered from its chunks alone.
 _Avoid_: Small doc
@@ -55,7 +60,8 @@ A numbered reference from an answer to the chunk that supports it.
 _Avoid_: Source, reference
 
 **Highlight**:
-The visible mark over the cited passage on a page of the original.
+The visible mark over the cited passage: on a page of the Original for a PDF or a picture, on the
+Converted Document's text for every other format.
 _Avoid_: Annotation, selection
 
 **Region**:

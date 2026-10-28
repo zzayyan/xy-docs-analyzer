@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.db import graph
-from app.ingest.convert import convert, scanned_pages
+from app.ingest.convert import convert, converted_path, scanned_pages
 from app.ingest.kg import extract_graph
 from app.ingest.tree import build_tree
 from app.models import embeddings, llm
@@ -95,6 +95,9 @@ def ingest(file_id: str, path: str) -> None:
             chunks=len(chunks), language=detect_language(chunks),
             status="embedding", progress=0.3, step_done=0, step_total=len(chunks),
         )
+        # After a step, so a Document deleted while converting leaves no file behind
+        converted_path(file_id).parent.mkdir(parents=True, exist_ok=True)
+        doc.save_as_json(converted_path(file_id))
 
         # Batched only so the UI can count chunks; one call would leave Embedding stuck at 0
         texts = [c["text"] for c in chunks]
@@ -114,7 +117,7 @@ def ingest(file_id: str, path: str) -> None:
             UNWIND $rows AS r
             MERGE (c:Chunk {id: r.id})
             SET c.text = r.text, c.idx = r.idx, c.pages = r.pages, c.headings = r.headings,
-                c.regions = r.regions, c.file_id = $file_id, c.embedding = r.embedding
+                c.regions = r.regions, c.refs = r.refs, c.file_id = $file_id, c.embedding = r.embedding
             MERGE (c)-[:PART_OF]->(f)
             """,
             {"file_id": file_id, "rows": rows},

@@ -29,3 +29,29 @@ export const highlightStyle = (r: Region) =>
     width: `${(100 * (r.r - r.l)) / r.page_width}%`,
     height: `${(100 * (r.b - r.t)) / r.page_height}%`,
   }) as const;
+
+/** The document viewer's dialog, for pages (DocumentViewer) and for text blocks (BlockViewer) alike */
+export const viewerDialogStyle = {
+  border: 'var(--stroke-hairline) solid var(--border-subtle)',
+  borderRadius: 'var(--radius-md)',
+  padding: 0,
+  width: 'min(1100px, 94vw)',
+  height: '90vh',
+  maxWidth: 'none',
+  maxHeight: 'none',
+  background: 'var(--surface-card)',
+  color: 'var(--text-body)',
+  boxShadow: 'var(--shadow-lg)',
+  overflow: 'hidden',
+} as const;
+
+export const viewerHeaderStyle = {
+  flex: '0 0 auto',
+  display: 'flex',
+  flexWrap: 'wrap',
+  alignItems: 'center',
+  gap: '6px 16px',
+  padding: '8px 12px 8px 20px',
+  borderBottom: 'var(--stroke-hairline) solid var(--border-subtle)',
+  fontSize: 'var(--fs-ui-xs)',
+} as const;

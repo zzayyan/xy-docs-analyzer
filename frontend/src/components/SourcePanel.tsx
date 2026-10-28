@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, type Citation, type Region } from '../lib/api';
 import { useLang } from '../lib/i18n';
 import { highlightStyle } from '../lib/citations';
+import { BlockView, BlockViewer } from './BlockView';
 import { DocumentViewer } from './DocumentViewer';
 
 const SOURCE_LABEL_KEY = {
@@ -49,12 +50,22 @@ export function SourcePanel({
   ];
   if (citation.headings.length > 0) rows.push([t.citationHeadings, citation.headings.join(' / ')]);
 
-  // No PDF, no kept Original, or no regions: plain text view
-  const showPage = !!doc?.has_original && doc.name.toLowerCase().endsWith('.pdf') && citation.regions.length > 0;
-  const canView = showPage && !!doc.page_count;
-  const withRegions = citations.filter((c) => c.regions.length > 0);
-  const startIndex = withRegions.findIndex((c) => c.chunk_id === citation.chunk_id && c.n === citation.n);
-  const viewerCitations = startIndex >= 0 ? withRegions : [citation];
+  // A PDF or a picture shows its page; any other format its converted text; a Document converted before
+  // either was kept, or a citation with nothing to mark, the plain text
+  const paged = !!doc?.page_count;
+  const showPage = paged && citation.regions.length > 0;
+  const view = useQuery({
+    queryKey: ['view', docId],
+    queryFn: () => api.view(docId),
+    enabled: !!doc && !paged && citation.refs.length > 0,
+    retry: false,
+    staleTime: Infinity,
+  }).data;
+  const blockView = !paged && citation.refs.length > 0 ? view : undefined;
+  const canView = showPage || !!blockView;
+  const marked = citations.filter((c) => (paged ? c.regions.length > 0 : c.refs.length > 0));
+  const startIndex = marked.findIndex((c) => c.chunk_id === citation.chunk_id && c.n === citation.n);
+  const viewerCitations = startIndex >= 0 ? marked : [citation];
 
   return (
     // Delimited: chunk_id ends in digits, so "f:1"+"23" would collide with "f:12"+"3"
@@ -100,6 +111,10 @@ export function SourcePanel({
             pulse={pulse}
             onOpen={canView ? () => setViewing(true) : undefined}
           />
+        ) : blockView ? (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: 'var(--stroke-hairline) solid var(--border-subtle)' }}>
+            <BlockView view={blockView} refs={citation.refs} pulse={pulse} />
+          </div>
         ) : (
           <p
             style={{
@@ -115,6 +130,16 @@ export function SourcePanel({
           </p>
         )}
       </div>
+
+      {viewing && blockView && doc && (
+        <BlockViewer
+          name={doc.name}
+          view={blockView}
+          citations={viewerCitations}
+          startIndex={Math.max(startIndex, 0)}
+          onClose={() => setViewing(false)}
+        />
+      )}
 
       {viewing && doc?.page_count && (
         <DocumentViewer

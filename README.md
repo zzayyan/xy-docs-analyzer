@@ -18,8 +18,11 @@ PDF, DOCX, PPTX, XLSX, CSV, HTML, Markdown, PNG and JPG (`SUPPORTED_FORMATS` in
 `backend/app/ingest/convert.py`). Any other file is refused at upload with a 415, and `GET /limits`
 returns the list the upload button offers.
 
-- Only PDFs get the per-batch OCR decision, the `MAX_PAGES` cap, and the original-page viewer
-  with highlights. For every other format a citation shows the cited text.
+- Only PDFs get the per-batch OCR decision and the `MAX_PAGES` cap.
+- A citation opens with the cited part marked. PDFs and pictures show the original page with
+  highlights. Every other format shows its converted document as text (`GET /documents/{id}/view`,
+  kept as JSON under `DATA_DIR/docling/`), with the cited paragraphs, slide lines or table rows
+  marked. Documents ingested before converted documents were kept show the cited text only.
 - Pictures are read by OCR. Each PPTX slide becomes its own chunk, with the slide number as its
   page.
 - Spreadsheet rows become sentences, so asking for one value works, but totals or averages over

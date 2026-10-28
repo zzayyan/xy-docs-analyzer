@@ -142,6 +142,25 @@ export interface Citation {
   source: 'vector' | 'tree' | 'kg' | 'kg_facts';
   text: string;
   regions: Region[];
+  /** Docling item refs, "{ref}/rows/{n}" for a table row: what a DocumentView marks */
+  refs: string[];
+}
+
+/** One piece of a converted document, plain text only, so nothing an upload carries can run. */
+export interface Block {
+  ref: string;
+  type: 'heading' | 'paragraph' | 'list_item' | 'table';
+  text: string;
+  level: number;
+  /** The slide or sheet; null for formats without pages */
+  page: number | null;
+  /** Tables only: the grid, header row first */
+  rows: string[][];
+}
+
+export interface DocumentView {
+  kind: 'document' | 'slides';
+  blocks: Block[];
 }
 
 export interface Section {
@@ -309,6 +328,8 @@ export const api = {
   originalUrl: (id: string) => `${API_URL}/documents/${id}/original`,
 
   pageImageUrl: (id: string, page: number) => `${API_URL}/documents/${id}/original/pages/${page}`,
+
+  view: (id: string) => request<DocumentView>(`/documents/${id}/view`),
 
   deleteDocument: (id: string) => request<void>(`/documents/${id}`, { method: 'DELETE' }),
 

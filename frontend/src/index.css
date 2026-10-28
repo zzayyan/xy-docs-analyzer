@@ -686,3 +686,84 @@ dialog::backdrop {
     animation: none;
   }
 }
+
+/* ---- Converted document as text (BlockView.tsx): formats without pages ---- */
+.block-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  line-height: var(--lh-loose);
+  color: var(--text-body);
+}
+.block-view p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.block-heading {
+  margin-top: 6px;
+  font-weight: var(--fw-semibold);
+  color: var(--text-title);
+}
+.block-heading[data-level='1'] {
+  font-size: 1.25em;
+}
+.block-heading[data-level='2'] {
+  font-size: 1.1em;
+}
+.block-list_item {
+  padding-left: 1.1em;
+  text-indent: -0.8em;
+}
+.block-list_item::before {
+  content: '•';
+  display: inline-block;
+  width: 0.8em;
+  text-indent: 0;
+  color: var(--text-muted);
+}
+.block-table {
+  overflow-x: auto;
+}
+.block-table table {
+  border-collapse: collapse;
+  font-size: var(--fs-ui-xs);
+}
+.block-table th,
+.block-table td {
+  padding: 4px 10px;
+  border: var(--stroke-hairline) solid var(--border-subtle);
+  text-align: left;
+  white-space: nowrap;
+}
+.block-table th {
+  background: var(--surface-subtle);
+  font-weight: var(--fw-semibold);
+  color: var(--text-title);
+}
+.block-mark,
+.block-table tr.block-mark td {
+  background: color-mix(in srgb, var(--brand-accent) 28%, transparent);
+}
+/* Text keeps its place; the mark reaches a little past it */
+p.block-mark,
+.block-heading.block-mark {
+  margin-inline: -6px;
+  padding-inline: 6px;
+  border-radius: var(--radius-sm);
+}
+.block-table.block-mark {
+  outline: 1px solid var(--brand-accent);
+}
+.slide-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: var(--stroke-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+}
+.slide-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}

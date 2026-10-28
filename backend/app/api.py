@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from app import auth, model_settings, reindex, store
 from app.config import settings
 from app.graph import MAX_HISTORY_TURNS, to_citations, workflow
-from app.ingest.convert import SUPPORTED_FORMATS, page_count, render_page
+from app.ingest.convert import SUPPORTED_FORMATS, converted_path, page_count, render_page, view_blocks
 from app.ingest.pipeline import create_file, ingest, set_status
 from app.models import chat_model, embedding_model
 
@@ -216,6 +216,25 @@ class Citation(BaseModel):
     source: str
     text: str
     regions: list[Region] = []
+    # Docling item refs, "{ref}/rows/{n}" for a table row: what GET /documents/{id}/view marks
+    refs: list[str] = []
+
+
+class Block(BaseModel):
+    ref: str
+    type: Literal["heading", "paragraph", "list_item", "table"]
+    text: str
+    # Headings only: 1 for a title, 2 for a sheet name or a top-level section
+    level: int
+    # The slide or sheet; None for formats without pages
+    page: int | None
+    # Tables only: the grid, header row first
+    rows: list[list[str]]
+
+
+class View(BaseModel):
+    kind: Literal["document", "slides"]
+    blocks: list[Block]
 
 
 class Section(BaseModel):
@@ -569,8 +588,10 @@ def list_documents() -> list[dict]:
 def document_status(doc_id: str) -> dict:
     file = get_file(doc_id)
     path = original_path(doc_id)
-    is_pdf = path is not None and mimetypes.guess_type(path)[0] == "application/pdf"
-    return {**file, "has_original": path is not None, "page_count": page_count(path) if is_pdf else None}
+    media_type = path and mimetypes.guess_type(path)[0] or ""
+    # A picture is a single page, shown like a PDF page with its OCR regions
+    pages = page_count(path) if media_type == "application/pdf" else 1 if media_type.startswith("image/") else None
+    return {**file, "has_original": path is not None, "page_count": pages}
 
 
 @app.get("/documents/{doc_id}/original")
@@ -591,13 +612,28 @@ def document_original_page(doc_id: str, page_no: int) -> Response:
     path = original_path(doc_id)
     if path is None:
         raise HTTPException(status_code=404, detail="original not kept for this document")
-    if mimetypes.guess_type(path)[0] != "application/pdf":
-        raise HTTPException(status_code=404, detail="original is not a PDF")
-    png = render_page(path, page_no)
-    if png is None:
+    media_type = mimetypes.guess_type(path)[0] or ""
+    if media_type.startswith("image/"):
+        image = path.read_bytes() if page_no == 1 else None
+    elif media_type == "application/pdf":
+        image, media_type = render_page(path, page_no), "image/png"
+    else:
+        raise HTTPException(status_code=404, detail="original has no pages")
+    if image is None:
         raise HTTPException(status_code=404, detail="page not found")
     # An Original never changes and doc_id is fresh per upload, so cache forever
-    return Response(png, media_type="image/png", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    return Response(image, media_type=media_type, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+@app.get("/documents/{doc_id}/view", response_model=View)
+def document_view(doc_id: str) -> dict:
+    """The converted document as text blocks, for the formats without an Original page to show."""
+    file = get_file(doc_id)
+    path = converted_path(doc_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="document converted before converted documents were kept")
+    kind = "slides" if file["name"].lower().endswith(".pptx") else "document"
+    return {"kind": kind, "blocks": view_blocks(path)}
 
 
 @app.delete("/documents/{doc_id}", status_code=204)
@@ -608,6 +644,7 @@ def delete_document(doc_id: str) -> None:
     # delete leaves a Document the user can delete again instead of an orphaned file.
     if path := original_path(doc_id):
         path.unlink(missing_ok=True)
+    converted_path(doc_id).unlink(missing_ok=True)
     store.delete_file(doc_id)
 
 

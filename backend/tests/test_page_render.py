@@ -87,3 +87,28 @@ def test_a_non_pdf_or_missing_original_has_no_page_count(ingested, monkeypatch):
 
     monkeypatch.setattr(store_module, "get_file", lambda doc_id: {"id": doc_id, "name": "old.pdf", "status": "done", "progress": 1.0})
     assert client.get("/documents/old").json()["page_count"] is None
+
+
+def upload_jpg() -> tuple[str, bytes]:
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (40, 20), "white").save(buffer, "JPEG")
+    response = client.post("/documents", files={"file": ("foto.jpg", buffer.getvalue(), "image/jpeg")})
+    assert response.status_code == 200
+    return response.json()["doc_id"], buffer.getvalue()
+
+
+def test_a_picture_is_a_one_page_original_whose_page_is_the_picture(ingested):
+    """Its OCR regions are in the picture's pixels, so the page viewer marks them as on a PDF page."""
+    doc_id, picture = upload_jpg()
+
+    assert client.get(f"/documents/{doc_id}").json()["page_count"] == 1
+    response = client.get(f"/documents/{doc_id}/original/pages/1")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.content == picture
+    assert "immutable" in response.headers["cache-control"]
+    assert client.get(f"/documents/{doc_id}/original/pages/2").status_code == 404

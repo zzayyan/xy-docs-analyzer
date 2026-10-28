@@ -2,8 +2,10 @@
 import json
 
 import pytest
+from docling_core.types.doc.document import DoclingDocument
 
 import app.graph as graph_mod
+from app.config import settings
 
 
 class Recorder:
@@ -29,7 +31,7 @@ def test_contexts_decodes_regions_and_tags_the_source():
     assert all(c["source"] == "vector" for c in contexts)
 
 
-def test_ingest_writes_each_chunks_regions_to_neo4j_as_json(monkeypatch):
+def test_ingest_writes_each_chunks_regions_to_neo4j_as_json(monkeypatch, tmp_path):
     import app.ingest.pipeline as pipeline
 
     written: list[tuple[str, dict]] = []
@@ -44,7 +46,8 @@ def test_ingest_writes_each_chunks_regions_to_neo4j_as_json(monkeypatch):
         {"idx": 1, "text": "b", "pages": [], "headings": [], "regions": []},
     ]
     monkeypatch.setattr(pipeline, "graph", lambda: Graph())
-    monkeypatch.setattr(pipeline, "convert", lambda path, scanned, on_progress=None: (None, 10, chunks))
+    monkeypatch.setattr(pipeline, "convert", lambda path, scanned, on_progress=None: (DoclingDocument(name="doc"), 10, chunks))
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
     monkeypatch.setattr(pipeline, "scanned_pages", lambda path: set())
     monkeypatch.setattr(pipeline, "embeddings", lambda: type("E", (), {"embed_documents": lambda self, texts: [[0.0]] * len(texts)})())
 
@@ -74,7 +77,7 @@ def test_a_document_deleted_mid_ingest_stops_it_without_an_error(monkeypatch):
 
 
 
-def test_ingest_records_the_document_language_and_survives_failing_to_detect_it(monkeypatch):
+def test_ingest_records_the_document_language_and_survives_failing_to_detect_it(monkeypatch, tmp_path):
     import app.ingest.pipeline as pipeline
 
     statuses: list[dict] = []
@@ -100,7 +103,8 @@ def test_ingest_records_the_document_language_and_survives_failing_to_detect_it(
 
     chunks = [{"idx": 0, "text": "Pasal 1 Pihak pertama wajib membayar", "pages": [1], "headings": [], "regions": []}]
     monkeypatch.setattr(pipeline, "graph", lambda: Graph())
-    monkeypatch.setattr(pipeline, "convert", lambda path, scanned, on_progress=None: (None, 10, chunks))
+    monkeypatch.setattr(pipeline, "convert", lambda path, scanned, on_progress=None: (DoclingDocument(name="doc"), 10, chunks))
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
     monkeypatch.setattr(pipeline, "scanned_pages", lambda path: set())
     monkeypatch.setattr(pipeline, "embeddings", lambda: type("E", (), {"embed_documents": lambda self, texts: [[0.0]] * len(texts)})())
 
@@ -113,3 +117,32 @@ def test_ingest_records_the_document_language_and_survives_failing_to_detect_it(
         [embedding] = [s for s in statuses if s.get("status") == "embedding"]
         assert embedding["language"] == expected
         assert statuses[-1]["status"] == "done", "an undetected language never fails the ingest"
+
+
+def test_ingest_keeps_each_chunks_refs_and_the_converted_document(monkeypatch, tmp_path):
+    import app.ingest.pipeline as pipeline
+    from docling_core.types.doc.labels import DocItemLabel
+
+    written: list[tuple[str, dict]] = []
+
+    class Graph:
+        def query(self, statement: str, params: dict) -> list:
+            written.append((statement, params))
+            return [{"n": 1}] if "count(f)" in statement else []
+
+    doc = DoclingDocument(name="kontrak")
+    doc.add_text(label=DocItemLabel.TEXT, text="Denda 2% per bulan.")
+    chunks = [{"idx": 0, "text": "Denda 2% per bulan.", "pages": [], "headings": [], "regions": [], "refs": ["#/texts/0"]}]
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(pipeline, "graph", lambda: Graph())
+    monkeypatch.setattr(pipeline, "convert", lambda path, scanned, on_progress=None: (doc, 10, chunks))
+    monkeypatch.setattr(pipeline, "scanned_pages", lambda path: set())
+    monkeypatch.setattr(pipeline, "embeddings", lambda: type("E", (), {"embed_documents": lambda self, texts: [[0.0]] * len(texts)})())
+
+    pipeline.ingest("f", "kontrak.docx")
+
+    [(statement, params)] = [(s, p) for s, p in written if "MERGE (c:Chunk" in s]
+    assert "c.refs = r.refs" in statement
+    assert [r["refs"] for r in params["rows"]] == [["#/texts/0"]]
+    kept = DoclingDocument.load_from_json(tmp_path / "docling" / "f.json")
+    assert [t.text for t in kept.texts] == ["Denda 2% per bulan."]

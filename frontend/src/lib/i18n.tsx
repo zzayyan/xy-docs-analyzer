@@ -176,6 +176,7 @@ export interface Dict {
   viewerCitationOf: (i: number, n: number) => string;
   viewerPrevCitation: string;
   viewerNextCitation: string;
+  viewerSlide: (n: number) => string;
 
   tabChat: string;
   tabOutline: string;
@@ -377,6 +378,7 @@ const en: Dict = {
   viewerCitationOf: (i, n) => `Citation ${i} of ${n}`,
   viewerPrevCitation: 'Previous citation',
   viewerNextCitation: 'Next citation',
+  viewerSlide: (n) => `Slide ${n}`,
 
   tabChat: 'Chat',
   tabOutline: 'Outline',
@@ -581,6 +583,7 @@ const id: Dict = {
   viewerCitationOf: (i, n) => `Sitasi ${i} dari ${n}`,
   viewerPrevCitation: 'Sitasi sebelumnya',
   viewerNextCitation: 'Sitasi berikutnya',
+  viewerSlide: (n) => `Slide ${n}`,
 
   tabChat: 'Chat',
   tabOutline: 'Daftar Isi',

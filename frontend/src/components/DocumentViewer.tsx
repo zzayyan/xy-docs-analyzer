@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, type Citation } from '../lib/api';
-import { highlightStyle } from '../lib/citations';
+import { highlightStyle, viewerDialogStyle, viewerHeaderStyle } from '../lib/citations';
 import { useLang } from '../lib/i18n';
 
 const MIN_ZOOM = 0.5;
@@ -96,33 +96,10 @@ export function DocumentViewer({
       onClose={onClose}
       // Content fills the dialog, so a click on the dialog itself is the backdrop
       onClick={(e) => e.target === e.currentTarget && dialogRef.current?.close()}
-      style={{
-        border: 'var(--stroke-hairline) solid var(--border-subtle)',
-        borderRadius: 'var(--radius-md)',
-        padding: 0,
-        width: 'min(1100px, 94vw)',
-        height: '90vh',
-        maxWidth: 'none',
-        maxHeight: 'none',
-        background: 'var(--surface-card)',
-        color: 'var(--text-body)',
-        boxShadow: 'var(--shadow-lg)',
-        overflow: 'hidden',
-      }}
+      style={viewerDialogStyle}
     >
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div
-          style={{
-            flex: '0 0 auto',
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            gap: '6px 16px',
-            padding: '8px 12px 8px 20px',
-            borderBottom: 'var(--stroke-hairline) solid var(--border-subtle)',
-            fontSize: 'var(--fs-ui-xs)',
-          }}
-        >
+        <div style={viewerHeaderStyle}>
           <span className="truncate" style={{ flex: '1 1 160px', fontWeight: 'var(--fw-semibold)', color: 'var(--text-title)' }}>
             {name}
           </span>

@@ -89,3 +89,13 @@ def test_deleting_a_document_removes_its_original(ingested):
 
     assert client.delete(f"/documents/{doc_id}").status_code == 204
     assert not original.exists()
+
+
+def test_deleting_a_document_removes_its_converted_document(ingested):
+    doc_id = upload("laporan.md", b"# Hello", "text/markdown")
+    converted = settings.data_dir / "docling" / f"{doc_id}.json"
+    converted.parent.mkdir(parents=True)
+    converted.write_text("{}")
+
+    assert client.delete(f"/documents/{doc_id}").status_code == 204
+    assert not converted.exists()

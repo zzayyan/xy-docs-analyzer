@@ -13,13 +13,13 @@ MATCH (node:Chunk {file_id: $file_id})
 WITH node, vector.similarity.cosine(node.embedding, $vector) AS score
 ORDER BY score DESC
 LIMIT $k
-RETURN node.id AS id, node.text AS text, node.pages AS pages, node.headings AS headings, node.regions AS regions
+RETURN node.id AS id, node.text AS text, node.pages AS pages, node.headings AS headings, node.regions AS regions, node.refs AS refs
 """
 
 KEYWORD_QUERY = """
 CALL db.index.fulltext.queryNodes('chunk_text', $text) YIELD node, score
 WHERE node.file_id = $file_id
-RETURN node.id AS id, node.text AS text, node.pages AS pages, node.headings AS headings, node.regions AS regions
+RETURN node.id AS id, node.text AS text, node.pages AS pages, node.headings AS headings, node.regions AS regions, node.refs AS refs
 LIMIT $k
 """
 

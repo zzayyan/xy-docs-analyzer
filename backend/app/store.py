@@ -100,7 +100,7 @@ RETURN n.key AS key, n.name AS name, n.type AS type, mentions, type(r) AS rel, o
 
 ENTITY_CHUNKS = """
 MATCH (c:Chunk {file_id: $file_id})-[:MENTIONS]->(:__Entity__ {file_id: $file_id, key: $key})
-RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings, c.regions AS regions
+RETURN c.id AS id, c.text AS text, c.pages AS pages, c.headings AS headings, c.regions AS regions, c.refs AS refs
 ORDER BY c.idx
 LIMIT $limit
 """

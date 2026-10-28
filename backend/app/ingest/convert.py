@@ -10,7 +10,8 @@ from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.utils.locks import pypdfium2_lock
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
-from docling_core.types.doc.document import DoclingDocument, PageItem
+from docling_core.types.doc.document import DoclingDocument, GroupItem, PageItem, RefItem, TableItem, TextItem
+from docling_core.types.doc.labels import DocItemLabel, GroupLabel
 from transformers import AutoTokenizer
 
 from app.config import settings
@@ -32,6 +33,11 @@ SUPPORTED_FORMATS = {
     ".jpg": InputFormat.IMAGE,
     ".jpeg": InputFormat.IMAGE,
 }
+
+
+def converted_path(doc_id: str) -> Path:
+    """The DoclingDocument kept as JSON, so a viewer can show it without converting again."""
+    return settings.data_dir / "docling" / f"{doc_id}.json"
 
 
 @lru_cache
@@ -94,6 +100,57 @@ def regions_of(doc_items, pages: dict[int, PageItem]) -> list[dict]:
     return regions
 
 
+def cited_rows(table: TableItem, text: str) -> list[int]:
+    """Grid rows whose "row, column = value" triplets, as the chunker writes them, are in the chunk's text."""
+    # ponytail: assumes one header row; a table with more matches nothing and is cited whole. A row whose
+    # triplet a long table's chunk boundary cuts in two is in neither chunk.
+    grid = [[cell.text.strip() for cell in row] for row in table.data.grid]
+    if not grid:
+        return []
+    header = grid[0]
+
+    def triplets(row: list[str]) -> list[str]:
+        if len(row) == 1:
+            return [f"{header[0]} = {row[0]}"]
+        return [f"{row[0]}, {header[j]} = {row[j]}" for j in range(1, len(row))]
+
+    return [i for i, row in enumerate(grid[1:], start=1) if any(t in text for t in triplets(row))]
+
+
+def refs_of(doc_items, text: str, doc: DoclingDocument) -> list[str]:
+    """The Docling items a chunk came from, a table narrowed to "{ref}/rows/{n}" for the rows it holds."""
+    refs = []
+    for item in doc_items:
+        # A chunk's items are plain DocItems; the table's grid is only on the document's own item
+        table = RefItem(cref=item.self_ref).resolve(doc)
+        rows = cited_rows(table, text) if isinstance(table, TableItem) else []
+        refs += [f"{item.self_ref}/rows/{row}" for row in rows] or [item.self_ref]
+    return refs
+
+
+def view_blocks(path: Path) -> list[dict]:
+    """A kept document's body in reading order as plain-text blocks, each keyed by the ref a citation carries."""
+    doc = DoclingDocument.load_from_json(path)
+    blocks = []
+    for item, _ in doc.iterate_items(with_groups=True):
+        page = item.prov[0].page_no if getattr(item, "prov", None) else None
+        block = {"ref": item.self_ref, "page": page, "level": 0, "text": "", "rows": []}
+        if isinstance(item, GroupItem) and item.label == GroupLabel.SHEET:
+            blocks.append({**block, "type": "heading", "level": 2, "text": item.name})
+        elif isinstance(item, TableItem):
+            blocks.append({**block, "type": "table", "rows": [[cell.text for cell in row] for row in item.data.grid]})
+        elif isinstance(item, TextItem):
+            if item.label == DocItemLabel.TITLE:
+                blocks.append({**block, "type": "heading", "level": 1, "text": item.text})
+            elif item.label == DocItemLabel.SECTION_HEADER:
+                blocks.append({**block, "type": "heading", "level": item.level + 1, "text": item.text})
+            elif item.label == DocItemLabel.LIST_ITEM:
+                blocks.append({**block, "type": "list_item", "text": item.text})
+            else:
+                blocks.append({**block, "type": "paragraph", "text": item.text})
+    return blocks
+
+
 def is_pdf(path: str) -> bool:
     return Path(path).suffix.lower() == ".pdf"
 
@@ -154,5 +211,6 @@ def convert(
             "pages": pages,
             "headings": chunk.meta.headings or [],
             "regions": regions_of(chunk.meta.doc_items, doc.pages),
+            "refs": refs_of(chunk.meta.doc_items, chunk.text, doc),
         })
     return doc, tokens, chunks

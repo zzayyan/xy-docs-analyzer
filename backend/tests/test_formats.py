@@ -39,6 +39,7 @@ def test_a_text_document_becomes_a_chunk_under_its_heading(tmp_path, suffix, wri
     [chunk] = chunks
     assert chunk["headings"] == ["Pembayaran"]
     assert "Denda keterlambatan 2% per bulan." in chunk["text"]
+    assert chunk["refs"] == ["#/texts/1"], "the paragraph after the heading"
 
 
 def test_each_slide_becomes_a_chunk_under_its_title_with_the_slide_number_as_page(tmp_path):
@@ -53,6 +54,7 @@ def test_each_slide_becomes_a_chunk_under_its_title_with_the_slide_number_as_pag
     _, _, chunks = convert(str(path), set())
     assert [(c["headings"], c["pages"]) for c in chunks] == [(["Rencana Q3"], [1]), (["Risiko"], [2])]
     assert "Vendor terlambat mengirim server." in chunks[1]["text"]
+    assert [c["refs"] for c in chunks] == [["#/texts/1"], ["#/texts/3"]], "each slide's body, after its title"
 
 
 def write_xlsx(path):
@@ -73,6 +75,29 @@ def test_a_spreadsheet_row_keeps_its_values_together_in_a_chunk(tmp_path, suffix
     write(path)
     _, _, chunks = convert(str(path), set())
     assert any("Pro" in c["text"] and "250000" in c["text"] for c in chunks)
+
+
+@pytest.mark.parametrize("suffix, write", [(".xlsx", write_xlsx), (".csv", write_csv)])
+def test_a_spreadsheet_chunk_points_at_the_table_rows_it_holds(tmp_path, suffix, write):
+    path = tmp_path / f"harga{suffix}"
+    write(path)
+    _, _, [chunk] = convert(str(path), set())
+    assert chunk["refs"] == ["#/tables/0/rows/1", "#/tables/0/rows/2"], "Basic and Pro, not the header row"
+
+
+def test_a_table_split_over_chunks_points_each_chunk_at_its_own_rows(tmp_path):
+    path = tmp_path / "pegawai.csv"
+    path.write_text("nama,kota\n" + "".join(f"Pegawai{i},Kota{i}\n" for i in range(1, 301)), encoding="utf-8")
+    _, _, chunks = convert(str(path), set())
+    assert len(chunks) > 1
+
+    cited = []
+    for chunk in chunks:
+        rows = [int(ref.rsplit("/", 1)[1]) for ref in chunk["refs"]]
+        assert all(f"Pegawai{row}, kota = Kota{row}" in chunk["text"] for row in rows)
+        cited += rows
+    missed = set(range(1, 301)) - set(cited)
+    assert len(missed) < len(chunks), "only a row cut in two by a chunk boundary goes unmarked"
 
 
 @pytest.mark.parametrize("suffix", [".png", ".jpg"])

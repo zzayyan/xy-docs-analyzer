@@ -28,7 +28,8 @@ def stubbed(monkeypatch):
         {"key": "ultralytics", "name": "Ultralytics", "type": "Organization", "mentions": 3, "rel": "DEVELOPED", "outgoing": False},
     ])
     monkeypatch.setattr(store_module, "entity_chunks", lambda file_id, key, limit: [
-        {"id": "f:7", "text": "YOLOv8 is ...", "pages": [3], "headings": ["2.1.4 YOLOv8"], "regions": [REGION]},
+        {"id": "f:7", "text": "YOLOv8 is ...", "pages": [3], "headings": ["2.1.4 YOLOv8"], "regions": [REGION],
+         "refs": ["#/texts/12"]},
     ])
     return seen
 
@@ -53,6 +54,7 @@ def test_an_entity_brings_its_neighbours_edges_both_ways_and_citations_the_sourc
     ]
     [citation] = body["citations"]
     assert (citation["n"], citation["source"], citation["pages"], citation["regions"]) == (1, "kg", [3], [REGION])
+    assert citation["refs"] == ["#/texts/12"]
 
 
 def test_an_entity_named_with_slashes_is_found_and_an_unknown_one_is_404(stubbed):
