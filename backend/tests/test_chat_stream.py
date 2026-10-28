@@ -194,3 +194,37 @@ def test_citations_event_carries_regions_when_present_and_empty_when_not(stubbed
 
     [(_, citations)] = [(e, d) for e, d in events if e == "citations"]
     assert [c["regions"] for c in citations] == [[region], []]
+
+
+@pytest.mark.parametrize("name, spreadsheet", [("harga.xlsx", True), ("harga.CSV", True), ("doc.pdf", False), ("notes.docx", False)])
+def test_stream_answer_tells_the_graph_whether_the_document_is_a_spreadsheet(stubbed, monkeypatch, name, spreadsheet):
+    monkeypatch.setattr(store_module, "get_file", lambda doc_id: {**fake_document(doc_id), "name": name})
+    seen_state = {}
+
+    async def fake_stream(state, stream_mode):
+        seen_state.update(state)
+        yield ("updates", {"fuse": {"contexts": []}})
+
+    monkeypatch.setattr(api_module.workflow, "astream", fake_stream)
+
+    with client.stream("GET", "/chat/stream", params={"doc_id": "d1", "question": "total harga?"}) as r:
+        r.read()
+
+    assert seen_state["spreadsheet"] is spreadsheet
+
+
+def test_a_computed_table_result_goes_out_and_is_saved_as_a_citation_with_its_rows(stubbed, monkeypatch):
+    computed = {"id": "table:result", "text": "SUM(harga) = 350000 (2 rows)", "pages": [], "headings": ["Paket"],
+                "regions": [], "refs": ["#/tables/0/rows/1", "#/tables/0/rows/2"], "source": "table"}
+
+    async def fake_stream(state, stream_mode):
+        yield ("updates", {"fuse": {"contexts": [computed]}})
+
+    monkeypatch.setattr(api_module.workflow, "astream", fake_stream)
+
+    with client.stream("GET", "/chat/stream", params={"doc_id": "d1", "question": "total harga?"}) as r:
+        events = parse_sse(r.read().decode())
+
+    [(_, [citation])] = [(e, d) for e, d in events if e == "citations"]
+    assert (citation["source"], citation["refs"]) == ("table", ["#/tables/0/rows/1", "#/tables/0/rows/2"])
+    assert stubbed["citations"] == [citation]

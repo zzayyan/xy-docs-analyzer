@@ -25,6 +25,9 @@ from app.models import chat_model, embedding_model
 
 READ_CHUNK = 1024 * 1024
 
+# Their questions can also be computed over the rows (app/retrieval/table.py)
+SPREADSHEETS = (".xlsx", ".csv")
+
 CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 @asynccontextmanager
@@ -727,7 +730,7 @@ def sse(event: str, data: object) -> str:
 
 async def stream_answer(
     doc_id: str, question: str, mode: str, model: str | None = None, history: list[dict] | None = None,
-    language: str | None = None,
+    language: str | None = None, spreadsheet: bool = False,
 ) -> AsyncIterator[str]:
     # Must stay an async generator: StreamingResponse runs a sync one in a worker thread that a client
     # disconnect never interrupts, so the finally block below would not run and no Turn gets saved.
@@ -739,7 +742,7 @@ async def stream_answer(
     try:
         async for kind, payload in workflow.astream(
             {"question": question, "doc_id": doc_id, "mode": mode, "model": model, "history": history or [],
-             "language": language},
+             "language": language, "spreadsheet": spreadsheet},
             stream_mode=["updates", "messages"],
         ):
             if kind == "updates":
@@ -785,6 +788,7 @@ def chat_stream(doc_id: str, question: str, model: str | None = None) -> Streami
     return StreamingResponse(
         stream_answer(
             doc_id, question, file["mode"], model or file.get("llm_model"), chat_history(doc_id), file.get("language"),
+            file["name"].lower().endswith(SPREADSHEETS),
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},

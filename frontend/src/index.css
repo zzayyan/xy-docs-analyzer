@@ -767,3 +767,14 @@ p.block-mark,
   font-size: 11px;
   color: var(--text-muted);
 }
+.table-result {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: var(--fs-ui-xs);
+  line-height: 1.5;
+  color: var(--text-title);
+  white-space: pre-wrap;
+}

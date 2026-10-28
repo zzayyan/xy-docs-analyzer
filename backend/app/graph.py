@@ -11,7 +11,7 @@ from app.config import settings
 from app.ingest.convert import tokenizer
 from app.models import llm
 from app.prompts import chat as prompts
-from app.retrieval import kg, tree_search, vector
+from app.retrieval import kg, table, tree_search, vector
 
 
 class State(TypedDict, total=False):
@@ -21,6 +21,7 @@ class State(TypedDict, total=False):
     model: str | None
     history: list[dict]
     language: str | None
+    spreadsheet: bool  # XLSX or CSV: table_query computes over its rows
     search_queries: list[str]
     retrieved: Annotated[list[dict], operator.add]  # parallel retrievers append here
     contexts: list[dict]
@@ -53,7 +54,7 @@ def strip_citations(text: str) -> str:
     # A prior turn's [n] numbers mean nothing now, and a small model confuses "the third one" with "[3]"
     return CITATION_MARKER.sub("", text)
 
-SOURCE_PRIORITY = {"kg_facts": 0, "vector": 1, "tree": 1, "kg": 2}
+SOURCE_PRIORITY = {"table": 0, "kg_facts": 1, "vector": 2, "tree": 2, "kg": 3}
 
 MAX_HISTORY_TURNS = 6
 
@@ -64,7 +65,8 @@ def recent_history(state: State) -> list[dict]:
 
 def route(state: State) -> list[str]:
     # Long documents keep vector search: a question about one clause or number can miss tree and graph both
-    return ["tree_search", "kg_retrieve", "vector_retrieve"] if state["mode"] == "long" else ["vector_retrieve"]
+    nodes = ["tree_search", "kg_retrieve", "vector_retrieve"] if state["mode"] == "long" else ["vector_retrieve"]
+    return nodes + ["table_query"] if state.get("spreadsheet") else nodes
 
 
 def contextualize(state: State) -> dict:
@@ -124,6 +126,11 @@ def kg_retrieve(state: State) -> dict:
     return {"retrieved": retrieved}
 
 
+def table_retrieve(state: State) -> dict:
+    query = "\n".join(search_queries(state))
+    return {"retrieved": table.search(state["doc_id"], query, model=state.get("model"))}
+
+
 def fuse(state: State) -> dict:
     seen: set[str] = set()
     contexts, used_tokens = [], 0
@@ -156,11 +163,17 @@ def to_citations(contexts: list[dict]) -> list[dict]:
     ]
 
 
+# Without it a small model redoes the arithmetic from the rows it can see, and gets it wrong
+COMPUTED = "(computed by the system over the whole sheet; state these numbers as given)"
+
+
+def block_header(context: dict) -> str:
+    return COMPUTED if context.get("source") == "table" else f"(pages: {context['pages'] or '-'})"
+
+
 def generate(state: State) -> dict:
     contexts = state.get("contexts", [])
-    blocks = "\n\n".join(
-        f"[{n}] (pages: {c['pages'] or '-'})\n{c['text']}" for n, c in enumerate(contexts, start=1)
-    )
+    blocks = "\n\n".join(f"[{n}] {block_header(c)}\n{c['text']}" for n, c in enumerate(contexts, start=1))
     history_messages = [
         msg for h in recent_history(state) for msg in (("human", h["question"]), ("ai", strip_citations(h["answer"])))
     ]
@@ -177,11 +190,13 @@ builder.add_node("contextualize", contextualize)
 builder.add_node("vector_retrieve", vector_retrieve)
 builder.add_node("tree_search", tree_retrieve)
 builder.add_node("kg_retrieve", kg_retrieve)
+builder.add_node("table_query", table_retrieve)
 builder.add_node("fuse", fuse)
 builder.add_node("generate", generate)
 builder.add_edge(START, "contextualize")
-builder.add_conditional_edges("contextualize", route, ["vector_retrieve", "tree_search", "kg_retrieve"])
+builder.add_conditional_edges("contextualize", route, ["vector_retrieve", "tree_search", "kg_retrieve", "table_query"])
 builder.add_edge("vector_retrieve", "fuse")
+builder.add_edge("table_query", "fuse")
 builder.add_edge(["tree_search", "kg_retrieve"], "fuse")
 builder.add_edge("fuse", "generate")
 builder.add_edge("generate", END)

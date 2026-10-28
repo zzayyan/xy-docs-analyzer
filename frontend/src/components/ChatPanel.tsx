@@ -16,6 +16,7 @@ const STATUS_NODE_KEY = {
   vector_retrieve: 'chatStatusVectorRetrieve',
   tree_search: 'chatStatusTreeSearch',
   kg_retrieve: 'chatStatusKgRetrieve',
+  table_query: 'chatStatusTableQuery',
 } as const;
 
 interface Selected {

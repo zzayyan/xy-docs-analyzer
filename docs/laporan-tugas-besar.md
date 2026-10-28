@@ -33,6 +33,7 @@ potongan dokumen yang relevan lebih dulu, lalu menjawab dari potongan itu:
 |---|---|
 | Tanya-jawab dengan sitasi | Jawaban di-stream token per token (SSE). Sitasi `[n]` membuka bagian yang dikutip dengan highlight: halaman asli untuk PDF dan gambar, teks dokumen (paragraf, kartu slide, atau baris tabel) untuk format lain. |
 | Percakapan lanjutan | Pertanyaan seperti "jelaskan poin kedua" diubah menjadi query mandiri memakai riwayat percakapan. |
+| Perhitungan spreadsheet | Pertanyaan total, rata-rata, jumlah baris, nilai terkecil/terbesar, peringkat, atau daftar baris atas XLSX dan CSV dihitung backend dari semua baris. Hasilnya menjadi sitasi pertama, dan baris yang dipakai ditandai. |
 | Lintas bahasa | Bahasa dokumen dideteksi saat ingest. Pertanyaan diterjemahkan ke bahasa dokumen untuk pencarian, jawaban mengikuti bahasa pertanyaan. |
 | Outline dokumen | Dokumen panjang punya pohon bagian (section tree) beserta ringkasan tiap bagian. |
 | Knowledge graph | Entitas dan relasi dari dokumen panjang ditampilkan sebagai graph yang bisa dijelajahi. |
@@ -117,7 +118,11 @@ Alur ini adalah graph LangGraph di `backend/app/graph.py`:
      yang relevan. Semua chunk di bagian itu ikut diambil.
    - **KG retrieve** (dokumen panjang): entitas di pertanyaan dicocokkan ke knowledge graph, relasi
      sampai 2 langkah diambil sebagai fakta, ditambah chunk yang menyebut entitas tersebut.
-3. **Fuse.** Hasil ketiga retriever digabung, duplikat dibuang, dan konteks dibatasi 8.000 token.
+   - **Table query** (XLSX dan CSV): LLM mengisi satu operasi terstruktur (sum, avg, count, min, max,
+     top_n, atau list, dengan filter dan group_by) dari schema sheet. Backend memeriksa nama kolom lalu
+     menghitungnya dari tabel hasil konversi. Bukan SQL bebas, karena model 4B menulis SQL dengan tidak
+     andal dan SQL memperluas apa yang bisa dilakukan sebuah pertanyaan.
+3. **Fuse.** Hasil retriever digabung (hasil hitung tabel selalu di urutan pertama), duplikat dibuang, dan konteks dibatasi 8.000 token.
 4. **Generate.** Qwen menjawab hanya dari blok konteks bernomor dan mengutipnya sebagai `[n]`.
    Daftar sitasi dikirim ke browser sebelum token jawaban pertama, lalu jawaban di-stream lewat
    Server-Sent Events.
@@ -174,7 +179,7 @@ cd backend
 uv run pytest tests/ -q --ignore=tests/test_smoke.py --ignore=tests/test_models_live.py
 ```
 
-Hasil terakhir: 133 test lulus. Semua test ini berjalan tanpa endpoint LLM atau embedding, dan hanya satu
+Hasil terakhir: 155 test lulus. Semua test ini berjalan tanpa endpoint LLM atau embedding, dan hanya satu
 (`test_users_and_sessions_in_neo4j`) yang membutuhkan Neo4j aktif.
 `tests/test_smoke.py` menjalankan alur ingest dan tanya-jawab end to end, sehingga membutuhkan Neo4j
 dan endpoint model yang aktif.
@@ -190,6 +195,9 @@ Keputusan desain dicatat sebagai ADR di [`docs/adr/`](adr/).
 - Viewer untuk format selain PDF dan gambar menampilkan teks hasil konversi, bukan tampilan asli. Styling,
   gambar di dalam dokumen, dan link tidak ikut tampil, dan PPTX tampil sebagai kartu slide berisi teks.
   Dokumen yang di-ingest sebelum hasil konversi disimpan hanya menampilkan teks yang dikutip.
+- Perhitungan spreadsheet mengandalkan model untuk memilih kolom dan filter yang tepat, jadi operasinya
+  ditampilkan di sitasi supaya bisa diperiksa. Sheet dengan header bertingkat, beberapa tabel dalam satu
+  sheet, atau tanggal bernama bulan ("15 Januari 2024") belum terbaca dengan baik.
 - Model kecil seperti Qwen3.5-4B cepat, tetapi kadang kurang tepat untuk pertanyaan yang memerlukan
   penalaran panjang. Model bisa diganti dari Settings tanpa mengubah kode.
 - Mengganti model embedding mengharuskan semua dokumen di-index ulang, karena vektor dari model yang

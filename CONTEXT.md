@@ -59,6 +59,11 @@ _Avoid_: Message, exchange
 A numbered reference from an answer to the chunk that supports it.
 _Avoid_: Source, reference
 
+**Table Calculation**:
+A total, average, count, minimum, maximum, ranking or listing the backend computes over every row of
+a spreadsheet's sheet, after the model picks the operation; cited first, with the rows it used.
+_Avoid_: Aggregation (alone), table query, SQL
+
 **Highlight**:
 The visible mark over the cited passage: on a page of the Original for a PDF or a picture, on the
 Converted Document's text for every other format.

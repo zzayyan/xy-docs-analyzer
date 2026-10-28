@@ -151,6 +151,21 @@ def view_blocks(path: Path) -> list[dict]:
     return blocks
 
 
+def sheet_tables(path: Path) -> list[tuple[str, str, list[list[str]]]]:
+    """A kept document's tables as (name, ref, grid): the sheet's name, numbered when a sheet holds several."""
+    tables, sheet = [], None
+    for item, _ in DoclingDocument.load_from_json(path).iterate_items(with_groups=True):
+        if isinstance(item, GroupItem) and item.label == GroupLabel.SHEET:
+            sheet = item.name
+        elif isinstance(item, TableItem) and item.data.grid:
+            name = sheet or "Table"
+            taken = {t[0] for t in tables}
+            if name in taken or not sheet:
+                name = next(f"{name} {n}" for n in range(2 if sheet else 1, len(tables) + 3) if f"{name} {n}" not in taken)
+            tables.append((name, item.self_ref, [[cell.text for cell in row] for row in item.data.grid]))
+    return tables
+
+
 def is_pdf(path: str) -> bool:
     return Path(path).suffix.lower() == ".pdf"
 

@@ -156,6 +156,7 @@ export interface Dict {
   chatStatusVectorRetrieve: string;
   chatStatusTreeSearch: string;
   chatStatusKgRetrieve: string;
+  chatStatusTableQuery: string;
 
   citationTitle: (n: number) => string;
   citationSource: string;
@@ -165,6 +166,7 @@ export interface Dict {
   citationSourceTree: string;
   citationSourceKg: string;
   citationSourceKgFacts: string;
+  citationSourceTable: string;
   citationClose: string;
   citationPageOf: (i: number, n: number) => string;
   citationPrevPage: string;
@@ -358,6 +360,7 @@ const en: Dict = {
   chatStatusVectorRetrieve: 'Searching the document…',
   chatStatusTreeSearch: 'Reading the outline…',
   chatStatusKgRetrieve: 'Reading the knowledge graph…',
+  chatStatusTableQuery: 'Computing over the table…',
 
   citationTitle: (n) => `Source ${n}`,
   citationSource: 'Found by',
@@ -367,6 +370,7 @@ const en: Dict = {
   citationSourceTree: 'Document outline',
   citationSourceKg: 'Knowledge graph evidence',
   citationSourceKgFacts: 'Knowledge graph facts',
+  citationSourceTable: 'Table calculation',
   citationClose: 'Close',
   citationPageOf: (i, n) => `Page ${i} of ${n}`,
   citationPrevPage: 'Previous page',
@@ -563,6 +567,7 @@ const id: Dict = {
   chatStatusVectorRetrieve: 'Mencari di dokumen…',
   chatStatusTreeSearch: 'Membaca daftar isi…',
   chatStatusKgRetrieve: 'Membaca graf pengetahuan…',
+  chatStatusTableQuery: 'Menghitung dari tabel…',
 
   citationTitle: (n) => `Sumber ${n}`,
   citationSource: 'Ditemukan lewat',
@@ -572,6 +577,7 @@ const id: Dict = {
   citationSourceTree: 'Daftar isi dokumen',
   citationSourceKg: 'Bukti graf pengetahuan',
   citationSourceKgFacts: 'Fakta graf pengetahuan',
+  citationSourceTable: 'Perhitungan tabel',
   citationClose: 'Tutup',
   citationPageOf: (i, n) => `Halaman ${i} dari ${n}`,
   citationPrevPage: 'Halaman sebelumnya',

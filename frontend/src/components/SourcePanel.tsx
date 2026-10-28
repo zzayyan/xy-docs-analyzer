@@ -11,6 +11,7 @@ const SOURCE_LABEL_KEY = {
   tree: 'citationSourceTree',
   kg: 'citationSourceKg',
   kg_facts: 'citationSourceKgFacts',
+  table: 'citationSourceTable',
 } as const;
 
 /** Docked beside the conversation, not a modal, so the citing answer stays readable. */
@@ -113,6 +114,8 @@ export function SourcePanel({
           />
         ) : blockView ? (
           <div style={{ marginTop: 16, paddingTop: 16, borderTop: 'var(--stroke-hairline) solid var(--border-subtle)' }}>
+            {/* A calculation shows what was computed, so a wrong column or filter is visible */}
+            {citation.source === 'table' && <pre className="table-result">{citation.text}</pre>}
             <BlockView view={blockView} refs={citation.refs} pulse={pulse} />
           </div>
         ) : (

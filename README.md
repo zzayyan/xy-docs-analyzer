@@ -25,8 +25,10 @@ returns the list the upload button offers.
   marked. Documents ingested before converted documents were kept show the cited text only.
 - Pictures are read by OCR. Each PPTX slide becomes its own chunk, with the slide number as its
   page.
-- Spreadsheet rows become sentences, so asking for one value works, but totals or averages over
-  many rows do not yet.
+- Spreadsheet rows become sentences, so asking for one value works through search. A total,
+  average, count, minimum, maximum, ranking or listing over an XLSX or CSV sheet is computed by the
+  backend over every row instead (`app/retrieval/table.py`): the model only picks the operation, and
+  the result is cited first, with the rows it used marked. A "Total" row at the bottom is left out.
 
 ## Run it
 

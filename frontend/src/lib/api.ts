@@ -139,7 +139,8 @@ export interface Citation {
   chunk_id: string;
   pages: number[];
   headings: string[];
-  source: 'vector' | 'tree' | 'kg' | 'kg_facts';
+  /** table: a calculation the backend ran over a spreadsheet's rows */
+  source: 'vector' | 'tree' | 'kg' | 'kg_facts' | 'table';
   text: string;
   regions: Region[];
   /** Docling item refs, "{ref}/rows/{n}" for a table row: what a DocumentView marks */
